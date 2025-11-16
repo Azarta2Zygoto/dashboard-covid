@@ -1,4 +1,5 @@
 from dash import Dash, html, dash_table, dcc, Input, Output
+from typing import Tuple
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -7,6 +8,13 @@ import networkx as nx
 import os
 
 app = Dash("Covid study dashboard")
+cases_type = ['total_cases', 'new_cases', 'total_deaths', 'new_deaths', 'reproduction_rate', 'icu_patients', 'hosp_patients', 'total_tests', 'new_tests', 'positive_rate', 'tests_per_case', 'total_vaccinations', 'people_vaccinated', 'people_fully_vaccinated', 'new_vaccinations', 'vaccinations_per_hundred']
+
+
+hard_coded_dates = ['2020-06-01', '2020-09-01', '2020-12-01',
+                    '2021-03-01', '2021-06-01', '2021-09-01', '2021-12-01',
+                    '2022-03-01', '2022-06-01', '2022-09-01', '2022-12-25',
+                    '2023-03-01', '2023-06-01', '2023-09-01', '2023-12-01']
 
 # Load dataset
 path = os.path.join('data', 'covid_data.csv')
@@ -118,6 +126,40 @@ def deaths_ratio_per_country(date: str) -> go.Figure:
     )
     return fig
 
+def absolute_deviation_calcul(series: pd.Series) -> float:
+    mean = series.mean()
+    return (series - mean).abs().mean()
+
+
+def get_all_distribution(case_type: str, date: str) -> Tuple[go.Figure, float, float, float, float, float, float]:
+    
+    df_filtered = covid_df[covid_df['date'] == date].copy()
+
+    df_filtered[case_type] = df_filtered[case_type].astype(float).fillna(0)
+    
+    mean = df_filtered[case_type].mean()
+    median = df_filtered[case_type].median()
+    max = df_filtered[case_type].max()
+    min = df_filtered[case_type].min()
+    std = df_filtered[case_type].std()
+    absolute_deviation = absolute_deviation_calcul(df_filtered[case_type])
+    
+    normalized = False
+    if case_type not in ["reproduction_rate", "positive_rate", "tests_per_case"]:
+        normalized = True
+        pop = pd.to_numeric(df_filtered.get('population', pd.Series(np.nan, index=df_filtered.index)), errors='coerce')
+        pop = pop.replace(0, np.nan).fillna(1)
+        df_filtered[case_type] = df_filtered[case_type] / pop * 1000000
+
+    
+    fig = px.histogram(
+        df_filtered,
+        x=case_type,
+        nbins=50,
+        title=f'Distribution of {case_type} on {date} {"(normalized per 1 000 000 people)" if normalized else ""}',
+        labels={case_type: case_type.replace('_', ' ').title()}
+    )
+    return fig, mean, median, max, min, std, absolute_deviation
 
 countries = get_all_iso_code()
 first_country = list(countries.keys())[0]
@@ -153,7 +195,35 @@ app.layout = [
         dcc.Graph(
             id='death-ratio-graph',
             figure=deaths_ratio_per_country(dates[0])
-        )
+        ),
+        html.Div(id='output-container',
+            children=[
+                html.H2(id='distribution', children='Distribution of Cases/Deaths'),
+                dcc.Dropdown(
+                    id='case-type-dropdown',
+                    options=[{'label': case.replace("_", " "), 'value': case} for case in cases_type],
+                    value=cases_type[0]
+                ),
+                dcc.Dropdown(
+                    id='date-distribution-dropdown',
+                    options=[date for date in hard_coded_dates],
+                    value=hard_coded_dates[0]
+                ),
+                html.Ul(id='statistics-list',
+                    children=[
+                        html.Li(id='mean-item', children='Mean: '),
+                        html.Li(id='median-item', children='Median: '),
+                        html.Li(id='max-item', children='Max: '),
+                        html.Li(id='min-item', children='Min: '),
+                        html.Li(id='std-item', children='Standard Deviation: '),
+                        html.Li(id='absolute-deviation-item', children='Absolute Deviation: '),
+                    ]
+                ),
+                dcc.Graph(
+                    id='distribution-graph',
+                    figure=get_all_distribution(cases_type[0], dates[0])[0]
+                ),
+            ])
     ]),
 ]
 
@@ -191,7 +261,37 @@ def update_total_graphs(n_clicks, date):
         err = go.Figure()
         err.add_annotation(text=f"Error building figure: {e}", showarrow=False)
         return err, err, err
-    
-    
+
+
+@app.callback(
+    Output('distribution', 'children'),
+    Output('distribution-graph', 'figure'),
+    Output('mean-item', 'children'),
+    Output('median-item', 'children'),
+    Output('max-item', 'children'),
+    Output('min-item', 'children'),
+    Output('std-item', 'children'),
+    Output('absolute-deviation-item', 'children'),
+    Input('case-type-dropdown', 'value'),
+    Input('date-distribution-dropdown', 'value')
+)
+def update_distribution_graph(case_type:str, date:str):
+    if not case_type or not date:
+        return go.Figure()
+    try:
+        title = f'Distribution of {case_type.replace("_", " ").title()}'
+        fig, mean, median, max, min, std, absolute_deviation = get_all_distribution(case_type, date)
+        return title, \
+            fig, \
+            f'Mean: {mean:.2f}', \
+            f'Median: {median:.2f}', \
+            f'Max: {max:.2f}', \
+            f'Min: {min:.2f}', \
+            f'Standard Deviation: {std:.2f}', \
+            f'Absolute Deviation: {absolute_deviation:.2f}'
+    except Exception as e:
+        fig = go.Figure()
+        fig.add_annotation(text=f"Error building figure: {e}", showarrow=False)
+        return fig
 if __name__ == '__main__':
     app.run(debug=True)
