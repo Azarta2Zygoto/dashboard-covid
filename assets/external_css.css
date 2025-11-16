@@ -1,0 +1,13 @@
+
+th {
+    font-size: 24px;
+    font-weight: 800;
+}
+.column-0 {
+    text-align: left !important;
+    width: 20rem;
+}
+.column-1 {
+    text-align: center !important;
+    width: 10rem;
+}
