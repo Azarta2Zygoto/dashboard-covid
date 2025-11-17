@@ -8,7 +8,7 @@ import networkx as nx
 import os
 
 app = Dash("Covid study dashboard")
-cases_type = ['total_cases', 'new_cases', 'total_deaths', 'new_deaths', 'reproduction_rate', 'icu_patients', 'hosp_patients', 'total_tests', 'new_tests', 'positive_rate', 'tests_per_case', 'total_vaccinations', 'people_vaccinated', 'people_fully_vaccinated', 'new_vaccinations', 'vaccinations_per_hundred']
+cases_type = ['total_cases', 'new_cases', 'total_deaths', 'new_deaths', 'reproduction_rate', 'icu_patients', 'hosp_patients', 'total_tests', 'new_tests', 'positive_rate', 'tests_per_case', 'total_vaccinations', 'people_vaccinated', 'people_fully_vaccinated', 'new_vaccinations']
 
 
 hard_coded_dates = ['2020-06-01', '2020-09-01', '2020-12-01',
@@ -130,6 +130,9 @@ def absolute_deviation_calcul(series: pd.Series) -> float:
     mean = series.mean()
     return (series - mean).abs().mean()
 
+def correlation_coefficient(series1: pd.Series, series2: pd.Series) -> float:
+    return series1.corr(series2)
+
 
 def get_all_distribution(case_type: str, date: str) -> Tuple[go.Figure, float, float, float, float, float, float]:
     
@@ -160,6 +163,20 @@ def get_all_distribution(case_type: str, date: str) -> Tuple[go.Figure, float, f
         labels={case_type: case_type.replace('_', ' ').title()}
     )
     return fig, mean, median, max, min, std, absolute_deviation
+
+def get_all_boxplots(date: str) -> go.Figure:
+    df_filtered = covid_df[covid_df['date'] == date].copy()
+    fig = go.Figure()
+    for case in cases_type:
+        df_filtered[case] = df_filtered[case].astype(float).fillna(0)
+        fig.add_trace(go.Box(y=df_filtered[case], name=case.replace('_', ' ').title()))
+    fig.update_layout(
+        title=f'Boxplots of Covid-19 Cases/Deaths on {date}',
+        yaxis_title='Value'
+    )
+    return fig
+
+
 
 countries = get_all_iso_code()
 first_country = list(countries.keys())[0]
@@ -223,6 +240,10 @@ app.layout = [
                     id='distribution-graph',
                     figure=get_all_distribution(cases_type[0], dates[0])[0]
                 ),
+                dcc.Graph(
+                    id='boxplot-graph',
+                    figure=get_all_boxplots(hard_coded_dates[0])
+                )
             ])
     ]),
 ]
