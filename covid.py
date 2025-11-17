@@ -11,10 +11,11 @@ app = Dash("Covid study dashboard")
 cases_type = ['total_cases', 'new_cases', 'total_deaths', 'new_deaths', 'reproduction_rate', 'icu_patients', 'hosp_patients', 'total_tests', 'new_tests', 'positive_rate', 'tests_per_case', 'total_vaccinations', 'people_vaccinated', 'people_fully_vaccinated', 'new_vaccinations']
 
 
-hard_coded_dates = ['2020-06-01', '2020-09-01', '2020-12-01',
-                    '2021-03-01', '2021-06-01', '2021-09-01', '2021-12-01',
-                    '2022-03-01', '2022-06-01', '2022-09-01', '2022-12-25',
-                    '2023-03-01', '2023-06-01', '2023-09-01', '2023-12-01']
+hard_coded_dates = ['2020-05-31', '2020-09-06', '2020-12-06',
+                    '2021-03-07', '2021-06-06', '2021-09-05', '2021-12-05',
+                    '2022-03-06', '2022-06-05', '2022-09-04', '2022-12-25',
+                    '2023-03-05', '2023-06-04', '2023-09-03', '2023-12-03',
+                    '2024-03-03', '2024-06-02']
 
 # Load dataset
 path = os.path.join('data', 'covid_data.csv')
@@ -29,6 +30,16 @@ def get_all_iso_code() -> dict:
 def get_all_dates() -> list:
     dates = covid_df['date'].dropna().unique().tolist()
     dates.sort()
+    corrected_dates = []
+    for date in dates:
+        try:
+            pd.to_datetime(date)
+            values = covid_df[covid_df['date'] == date]["new_cases"].astype(float).dropna()
+            if len(values) == 0 or values.sum() == 0:
+                continue
+            corrected_dates.append(date)
+        except Exception:
+            continue
     return dates
 
 def evolution_over_time(iso_code: str) -> go.Figure:
