@@ -1,4 +1,14 @@
+main {
+    font-family: Arial, sans-serif;
+    margin: 2rem;
+}
 
+h1 {
+    font-size: 36px;
+    font-weight: 900;
+    text-align: center;
+    margin-bottom: 2rem;
+}
 th {
     font-size: 24px;
     font-weight: 800;
@@ -10,4 +20,43 @@ th {
 .column-1 {
     text-align: center !important;
     width: 10rem;
+}
+
+.footer {
+    background-color: #b1b6fc;
+    font-size: 18px;
+    font-weight: 600;
+    text-align: center;
+    margin-top: 2rem;
+    padding: 0.5rem;
+}
+.button {
+    margin: 1rem;
+    padding: 0.5rem 1rem;
+    font-size: 16px;
+    border: 2px solid #636efa;
+    border-radius: 8px;
+    background-color: #b1b6fc;
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
+    transition: background-color 0.3s, color 0.3s;
+}
+.button:hover {
+    background-color: #8a94f9;
+    cursor: pointer;
+}
+.button:active {
+    background-color: #636efa;
+    color: white;
+}
+.row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+    gap: 1rem;
+}
+
+.Select-control {
+    border: 2px solid #636efa;
+    border-radius: 8px;
+    width: 200px;
 }
