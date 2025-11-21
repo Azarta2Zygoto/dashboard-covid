@@ -1,4 +1,5 @@
-from dash import Dash, html, dash_table, dcc, Input, Output
+from dash import Dash, html, dash_table, dcc, Input, Output, State
+from components.clustering import COVIDClustering1
 from typing import Tuple
 import pandas as pd
 import numpy as np
@@ -13,7 +14,8 @@ app = Dash(
     requests_pathname_prefix=BASE + "/",
     routes_pathname_prefix=BASE + "/")
 
-cases_type = ['total_cases', 'new_cases', 'total_deaths', 'new_deaths', 'reproduction_rate', 'icu_patients', 'hosp_patients', 'total_tests', 'new_tests', 'positive_rate', 'tests_per_case', 'total_vaccinations', 'people_vaccinated', 'people_fully_vaccinated', 'new_vaccinations']
+
+cases_type = ['total_cases', 'new_cases', 'total_deaths', 'new_deaths', 'reproduction_rate', 'icu_patients', 'hosp_patients', 'total_tests', 'new_tests', 'positive_rate', 'tests_per_case', 'total_vaccinations', 'people_vaccinated', 'people_fully_vaccinated', 'new_vaccinations', 'vaccinations_per_hundred']
 
 
 hard_coded_dates = ['2020-05-31', '2020-09-06', '2020-12-06',
@@ -21,18 +23,38 @@ hard_coded_dates = ['2020-05-31', '2020-09-06', '2020-12-06',
                     '2022-03-06', '2022-06-05', '2022-09-04', '2022-12-25',
                     '2023-03-05', '2023-06-04', '2023-09-03', '2023-12-03',
                     '2024-03-03', '2024-06-02']
+base_features = [
+    'total_cases_per_million',
+    'total_deaths_per_million', 
+    'gdp_per_capita',
+    'human_development_index',
+    'aged_65_older',
+    'population_density'
+]
+
 
 # Load dataset
 path = os.path.join('data', 'covid_data.csv')
 covid_df = pd.read_csv(path, delimiter=",", dtype=str)
-pays_df = covid_df[['continent']].dropna()
+
+# Data preprocessing
+print("Preprocessing data...")
+covid_df['date'] = pd.to_datetime(covid_df['date'], errors='coerce')
+covid_df.sort_values(['iso_code', 'date'], inplace=True)
+covid_df.reset_index(drop=True, inplace=True)
+
+# INITIALIZATION Of the CLUSTERING MANAGER
+clustering_manager = COVIDClustering1(covid_df)
+
 
 def get_all_iso_code() -> dict:
-    # get subset of unique iso_code with locations
+    """Get all ISO codes with their corresponding location names."""
     location = covid_df.set_index('iso_code')['location'].to_dict()
     return location
 
+
 def get_all_dates() -> list:
+    """Get all valid dates from the dataset."""
     dates = covid_df['date'].dropna().unique().tolist()
     dates.sort()
     corrected_dates = []
@@ -47,42 +69,61 @@ def get_all_dates() -> list:
             continue
     return dates
 
-def evolution_over_time(iso_code: str) -> go.Figure:
+
+# Precompute countries and dates for dropdowns
+countries = get_all_iso_code()
+first_country = list(countries.keys())[0]
+dates = get_all_dates()
+
+
+
+def evolution_over_time(iso_code: str, absolute:bool=True) -> go.Figure:
     df_filtered = covid_df[covid_df['iso_code'] == iso_code]
-    df_filtered['date'] = pd.to_datetime(df_filtered['date'])
-    df_filtered = df_filtered.sort_values('date')
+    if df_filtered.empty:
+        return go.Figure()
+    
+    total_case = df_filtered['total_cases'].astype(float).fillna(0)
+    total_death = df_filtered['total_deaths'].astype(float).fillna(0)
+    if not absolute:
+        population = df_filtered['population'].astype(float).replace(0, np.nan).fillna(1)
+        total_case = total_case / population * 1000000
+        total_death = total_death / population * 1000000
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df_filtered['date'],
-        y=df_filtered['total_cases'].astype(float),
+        y=total_case.astype(float),
         mode='lines+markers',
         name='Total Cases'
     ))
     fig.add_trace(go.Scatter(
         x=df_filtered['date'],
-        y=df_filtered['total_deaths'].astype(float),
+        y=total_death.astype(float),
         mode='lines+markers',
         name='Total Deaths'
     ))
     fig.update_layout(
-        title=f'Covid-19 Evolution Over Time for {iso_code}',
+        title=f"Evolution du nombre d'infectés et de mort du Covid 19 dans le temps dans le pays {countries.get(iso_code, 'Unknown Country')}{'' if absolute else ' par million d habitants'}",
         xaxis_title='Date',
         yaxis_title='Count'
     )
     return fig
 
 def total_case_total_death_date_geo(date: str, absolute:bool=True) -> go.Figure:
-    df_filtered = covid_df[covid_df['date'] == date]
-    df_filtered['total_cases'] = df_filtered['total_cases'].astype(float).fillna(0)
-    df_filtered['total_deaths'] = df_filtered['total_deaths'].astype(float).fillna(0)
+    correct_date = pd.to_datetime(date)
+    df_filtered = covid_df[covid_df['date'] == correct_date].copy()
+    if df_filtered.empty:
+        return go.Figure()
+    
+    total_case = df_filtered['total_cases'].astype(float).fillna(0)
+    total_death = df_filtered['total_deaths'].astype(float).fillna(0)
     if not absolute:
-        df_filtered['population'] = df_filtered['population'].astype(float).replace(0, np.nan).fillna(1)
-        df_filtered['total_cases'] = df_filtered['total_cases'] / df_filtered['population'] * 100000
-        df_filtered['total_deaths'] = df_filtered['total_deaths'] / df_filtered['population'] * 100000
+        population = df_filtered['population'].astype(float).replace(0, np.nan).fillna(1)
+        total_case = total_case / population * 1000000
+        total_death = total_death / population * 1000000
 
-    df_filtered['log_total_cases'] = np.log1p(df_filtered['total_cases'])
-    df_filtered['log_total_deaths'] = np.log1p(df_filtered['total_deaths'])
+    df_filtered['log_total_cases'] = np.log1p(total_case)
+    df_filtered['log_total_deaths'] = np.log1p(total_death)
 
     fig = px.scatter_geo(
         df_filtered,
@@ -91,54 +132,7 @@ def total_case_total_death_date_geo(date: str, absolute:bool=True) -> go.Figure:
         size="log_total_cases",
         hover_name="location",
         projection="natural earth",
-        title=f'Global Covid-19 Cases and Deaths on {date}'
-    )
-    return fig
-
-def total_case_total_death_date(date: str, absolute:bool=True) -> go.Figure:
-    df_filtered = covid_df[covid_df['date'] == date]
-    df_filtered['total_cases'] = df_filtered['total_cases'].astype(float).fillna(0)
-    df_filtered['total_deaths'] = df_filtered['total_deaths'].astype(float).fillna(0)
-    
-    if not absolute:
-        df_filtered['population'] = df_filtered['population'].astype(float).replace(0, np.nan).fillna(1)
-        df_filtered['total_cases'] = df_filtered['total_cases'] / df_filtered['population'] * 100000
-        df_filtered['total_deaths'] = df_filtered['total_deaths'] / df_filtered['population'] * 100000
-
-    df_filtered['log_total_cases'] = np.log1p(df_filtered['total_cases'])
-    df_filtered['log_total_deaths'] = np.log1p(df_filtered['total_deaths'])
-
-    fig = px.scatter(
-        df_filtered,
-        x='total_cases',
-        y='total_deaths',
-        hover_name='location',
-        title=f'Total Cases vs Total Deaths on {date}',
-        labels={'total_cases': 'Total Cases', 'total_deaths': 'Total Deaths'}
-    )
-    return fig
-
-def deaths_ratio_per_country(date: str) -> go.Figure:
-    df_filtered = covid_df[covid_df['date'] == date]
-    df_filtered['total_cases'] = df_filtered['total_cases'].astype(float).fillna(0)
-    df_filtered['total_deaths'] = df_filtered['total_deaths'].astype(float).fillna(0)
-    
-    df_filtered['death_ratio'] = df_filtered['total_deaths'] / df_filtered['total_cases'].replace(0, np.nan)
-
-    fig = px.histogram(
-        df_filtered,
-        x='death_ratio',
-        nbins=50,
-        title=f'Death Ratio Distribution on {date}',
-        labels={'death_ratio': 'Death Ratio (Total Deaths / Total Cases)'}
-    )
-    fig = px.scatter(
-        df_filtered,
-        x='location',
-        y='death_ratio',
-        hover_name='location',
-        title=f'Death Ratio per Country on {date}',
-        labels={'death_ratio': 'Death Ratio (Total Deaths / Total Cases)'}
+        title=f'Nombre de cas et de décès dû au Covid-19 le {date} {"" if absolute else "(par million d habitants)"}',
     )
     return fig
 
@@ -151,10 +145,11 @@ def correlation_coefficient(series1: pd.Series, series2: pd.Series) -> float:
 
 
 def get_all_distribution(case_type: str, date: str) -> Tuple[go.Figure, float, float, float, float, float, float]:
-    
-    df_filtered = covid_df[covid_df['date'] == date].copy()
+    correct_date = pd.to_datetime(date)
+    df_filtered = covid_df[covid_df['date'] == correct_date].copy()
 
     df_filtered[case_type] = df_filtered[case_type].astype(float).fillna(0)
+    df_filtered = df_filtered[df_filtered[case_type] > 0]
     
     mean = df_filtered[case_type].mean()
     median = df_filtered[case_type].median()
@@ -179,94 +174,490 @@ def get_all_distribution(case_type: str, date: str) -> Tuple[go.Figure, float, f
         labels={case_type: case_type.replace('_', ' ').title()}
     )
     return fig, mean, median, max, min, std, absolute_deviation
+def adjacency_matrix_human_development_index(df: pd.DataFrame) -> Tuple[np.ndarray, pd.Series, list]:
+    """Compute adjacency matrix based on human development index differences.
+    5 if difference == 0
+    4 if difference == 0.01
+    3 if difference == 0.02
+    2 if difference == 0.03
+    1 if difference == 0.04
+    0 otherwise
+    Args:
+        df (pd.DataFrame): DataFrame containing 'location', 'human_development
+        _index', and 'continent' columns.
+    Returns:
+        np.ndarray: Adjacency matrix as per the defined scoring system.
+    """
 
-def get_all_boxplots(date: str) -> go.Figure:
-    df_filtered = covid_df[covid_df['date'] == date].copy()
+    tmp = df[['location', 'human_development_index', 'continent']].copy()
+    tmp['human_development_index'] = pd.to_numeric(tmp['human_development_index'], errors='coerce')
+    tmp = tmp[tmp['human_development_index'].notna() & tmp['continent'].notna()]
+
+    hdi_series = tmp.groupby('location', sort=False)['human_development_index'].first()
+    locations = hdi_series.index.to_list()
+    hdi_values = hdi_series.to_numpy(dtype=float)
+
+    # Pairwise absolute differences using broadcasting (very fast in numpy)
+    diffs = np.abs(hdi_values[:, None] - hdi_values[None, :])
+    # Round differences to 2 decimals to match original binning logic
+    diffs = np.round(diffs, 2)
+
+    # Vectorized mapping: 0->5, 0.01->4, 0.02->3, 0.03->2, 0.04->1, else 0
+    targets = np.array([0.00, 0.01, 0.02, 0.03, 0.04])
+    scores = np.array([5, 4, 3, 2, 1], dtype=np.int8)
+
+    # Use broadcasting with isclose for robustness against float errors
+    matrix = np.zeros_like(diffs, dtype=np.int8)
+    for tval, score in zip(targets, scores):
+        mask = np.isclose(diffs, tval, atol=1e-6)
+        matrix[mask] = score
+    
+    return matrix, hdi_series, locations
+
+
+def total_case_box_plot(
+    df: pd.DataFrame,
+    date: str,
+    delta:int=1,
+    is_absolute: bool=True
+) -> Tuple[go.Figure, go.Figure]:
+    """
+    Create a box plot for total cases on a given date.
+
+    Args:
+        df (pd.DataFrame): The dataframe containing covid data.
+        date (str): The date for which to create the box plot.
+
+    Returns:
+        go.Figure: A Plotly box plot figure.
+    """
     fig = go.Figure()
-    for case in cases_type:
-        df_filtered[case] = df_filtered[case].astype(float).fillna(0)
-        fig.add_trace(go.Box(y=df_filtered[case], name=case.replace('_', ' ').title()))
-    fig.update_layout(
-        title=f'Boxplots of Covid-19 Cases/Deaths on {date}',
-        yaxis_title='Value'
-    )
+
+    describes = []
+
+    for i in range(5):
+        date_value = pd.to_datetime(date) - pd.DateOffset(days=(i-2)*delta*7)
+        date_str = date_value.strftime('%Y-%m-%d')
+        temp_df = df[df['date'] == date_str].copy()
+        temp_df = temp_df[pd.to_numeric(temp_df['total_cases'], errors='coerce').notnull()]
+        temp_df['total_cases'] = pd.to_numeric(temp_df['total_cases'], errors='coerce')
+        temp_df = temp_df[temp_df['total_cases'] > 0]
+        temp_df = temp_df[temp_df['continent'].notna()]
+        values = temp_df['total_cases']
+        if not is_absolute:
+            values = temp_df['total_cases'] / pd.to_numeric(temp_df['population'], errors='coerce') * 1000000
+        
+        median = values.median()
+        absolute_deviation = absolute_deviation_calcul(values)
+
+        describes.append(values.describe())
+        describes[-1]['absolute_deviation'] = absolute_deviation
+        describes[-1]['median'] = median
+        fig.add_trace(go.Box(
+            y=values,
+            name=date_str,
+            boxmean='sd',
+            boxpoints='all',                # afficher tous les points
+            jitter=0.6,                     # dispersion des points pour lisibilité
+            pointpos=0,                     # position des points relatif à la boîte
+            marker=dict(size=5, opacity=0.8),
+            hovertext=temp_df['location'],  # texte affiché pour chaque point
+            hovertemplate='%{hovertext}<br>Total Cases: %{y}<extra></extra>'
+        ))
+
+    title = 'Total Cases Box Plot on ' + date
+    if not is_absolute:
+        title += ' (per million inhabitants)'
+    fig.update_layout(title=title)
+
+    fig2 = go.Figure()
+    for i, desc in enumerate(describes):
+        fig2.add_trace(go.Bar(
+            x=desc.index,
+            y=desc.values,
+            name=(pd.to_datetime(date) - pd.DateOffset(days=(i-2)*delta*7)).strftime('%Y-%m-%d')
+        ))
+    title2 = 'Descriptive Statistics for Total Cases on ' + date
+    if not is_absolute:
+        title2 += ' (per million inhabitants)'
+    fig2.update_layout(title=title2)
+
+    return fig, fig2
+
+def total_case_evolution(particular_quantile:float, is_absolute: bool=True) -> go.Figure:
+    """
+    Create a line plot for total cases evolution over time.
+    There are also lines for median, mean and std deviation and percentiles.
+    """
+    fig = go.Figure()
+
+    df_clean = covid_df[pd.to_numeric(covid_df['total_cases'], errors='coerce').notnull()].copy()
+    df_clean['total_cases'] = pd.to_numeric(df_clean['total_cases'], errors='coerce')
+    df_clean = df_clean[df_clean['total_cases'] > 0]
+    df_clean = df_clean[df_clean['continent'].notna()]
+
+    if is_absolute:
+        df_grouped = df_clean.groupby('date')['total_cases']
+    else:
+        df_clean['population'] = pd.to_numeric(df_clean['population'], errors='coerce')
+        df_grouped = (df_clean['total_cases'] / df_clean['population'] * 1000000).groupby(df_clean['date'])
+
+    dates = []
+    medians = []
+    means = []
+    std_devs = []
+    p25s = []
+    p75s = []
+    particular_quantiles = []
+
+    for date, group in df_grouped:
+        dates.append(date)
+        medians.append(group.median())
+        means.append(group.mean())
+        std_devs.append(group.std())
+        p25s.append(group.quantile(0.25))
+        p75s.append(group.quantile(0.75))
+        if particular_quantile is not None:
+            particular_quantiles.append(group.quantile(particular_quantile))
+
+    fig.add_trace(go.Scatter(x=dates, y=medians, mode='lines+markers', name='Median'))
+    fig.add_trace(go.Scatter(x=dates, y=means, mode='lines+markers', name='Mean'))
+    fig.add_trace(go.Scatter(x=dates, y=p25s, mode='lines', name='25th Percentile', line=dict(dash='dash')))
+    fig.add_trace(go.Scatter(x=dates, y=p75s, mode='lines', name='75th Percentile', line=dict(dash='dash')))
+    if particular_quantile is not None:
+        fig.add_trace(go.Scatter(x=dates, y=particular_quantiles, mode='lines', name=f'{particular_quantile*100}th Percentile', line=dict(dash='dot')))
+
+    title = 'Total Cases Evolution Over Time'
+    if not is_absolute:
+        title += ' (per million inhabitants)'
+    fig.update_layout(title=title, xaxis_title='Date', yaxis_title='Total Cases')
+
     return fig
 
-def boxplot_per_case_type(case_type: str, date: str, delay:int=60) -> go.Figure:
-    """Generate boxplot for a specific case type on a given date."""
+
+
+def general_case_box_plot(
+    df: pd.DataFrame,
+    case:str,
+    date: str,
+    delta:int=1,
+    is_absolute: bool=True
+) -> Tuple[go.Figure, go.Figure]:
+    """
+    Create a box plot for new cases on a given date.
+
+    Args:
+        df (pd.DataFrame): The dataframe containing covid data.
+        date (str): The date for which to create the box plot.
+
+    Returns:
+        go.Figure: A Plotly box plot figure.
+    """
     fig = go.Figure()
 
+    describes = []
+
+    for i in range(5):
+        date_value = pd.to_datetime(date) - pd.DateOffset(days=(i-2)*delta*7)
+        date_str = date_value.strftime('%Y-%m-%d')
+        temp_df = df[df['date'] == date_str].copy()
+        temp_df = temp_df[pd.to_numeric(temp_df[case], errors='coerce').notnull()]
+        temp_df[case] = pd.to_numeric(temp_df[case], errors='coerce')
+        temp_df = temp_df[temp_df[case] > 0]
+        temp_df = temp_df[temp_df[case].notna()]
+        values = temp_df[case]
+        if not is_absolute:
+            values = temp_df[case] / pd.to_numeric(temp_df['population'], errors='coerce') * 1000000
+        
+        median = values.median()
+        absolute_deviation = absolute_deviation_calcul(values)
+
+        describes.append(values.describe())
+        describes[-1]['absolute_deviation'] = absolute_deviation
+        describes[-1]['median'] = median
+        fig.add_trace(go.Box(
+            y=values,
+            name=date_str,
+            boxmean='sd',
+            boxpoints='all',                # afficher tous les points
+            jitter=0.6,                     # dispersion des points pour lisibilité
+            pointpos=0,                     # position des points relatif à la boîte
+            marker=dict(size=5, opacity=0.8),
+            hovertext=temp_df['location'],  # texte affiché pour chaque point
+            hovertemplate='%{hovertext}<br>New Cases: %{y}<extra></extra>'
+        ))
+
+    title = f'{case} Box Plot on ' + date
+    if not is_absolute:
+        title += ' (per million inhabitants)'
+    fig.update_layout(title=title)
+
+    fig2 = go.Figure()
+    for i, desc in enumerate(describes):
+        fig2.add_trace(go.Bar(
+            x=desc.index,
+            y=desc.values,
+            name=(pd.to_datetime(date) - pd.DateOffset(days=(i-2)*delta*7)).strftime('%Y-%m-%d')
+        ))
+    title2 = f'Descriptive Statistics for {case} on ' + date
+    if not is_absolute:
+        title2 += ' (per million inhabitants)'
+    fig2.update_layout(title=title2)
+    return fig, fig2
 
 
-    df_filtered = covid_df[covid_df['date'] == date].copy()
-    df_filtered[case_type] = df_filtered[case_type].astype(float).fillna(0)
+def new_case_box_plot(
+    df: pd.DataFrame,
+    date: str,
+    delta:int=1,
+    is_absolute: bool=True
+) -> Tuple[go.Figure, go.Figure]:
+    """
+    Create a box plot for new cases on a given date.
+
+    Args:
+        df (pd.DataFrame): The dataframe containing covid data.
+        date (str): The date for which to create the box plot.
+
+    Returns:
+        go.Figure: A Plotly box plot figure.
+    """
+    fig = go.Figure()
+
+    describes = []
+
+    for i in range(5):
+        date_value = pd.to_datetime(date) - pd.DateOffset(days=(i-2)*delta*7)
+        date_str = date_value.strftime('%Y-%m-%d')
+        temp_df = df[df['date'] == date_str].copy()
+        temp_df = temp_df[pd.to_numeric(temp_df['new_cases'], errors='coerce').notnull()]
+        temp_df['new_cases'] = pd.to_numeric(temp_df['new_cases'], errors='coerce')
+        temp_df = temp_df[temp_df['new_cases'] > 0]
+        temp_df = temp_df[temp_df['continent'].notna()]
+        values = temp_df['new_cases']
+        if not is_absolute:
+            values = temp_df['new_cases'] / pd.to_numeric(temp_df['population'], errors='coerce') * 1000000
+        
+        median = values.median()
+        absolute_deviation = absolute_deviation_calcul(values)
+
+        describes.append(values.describe())
+        describes[-1]['absolute_deviation'] = absolute_deviation
+        describes[-1]['median'] = median
+        fig.add_trace(go.Box(
+            y=values,
+            name=date_str,
+            boxmean='sd',
+            boxpoints='all',                # afficher tous les points
+            jitter=0.6,                     # dispersion des points pour lisibilité
+            pointpos=0,                     # position des points relatif à la boîte
+            marker=dict(size=5, opacity=0.8),
+            hovertext=temp_df['location'],  # texte affiché pour chaque point
+            hovertemplate='%{hovertext}<br>New Cases: %{y}<extra></extra>'
+        ))
+
+    title = 'New Cases Box Plot on ' + date
+    if not is_absolute:
+        title += ' (per million inhabitants)'
+    fig.update_layout(title=title)
+
+    fig2 = go.Figure()
+    for i, desc in enumerate(describes):
+        fig2.add_trace(go.Bar(
+            x=desc.index,
+            y=desc.values,
+            name=(pd.to_datetime(date) - pd.DateOffset(days=(i-2)*delta*7)).strftime('%Y-%m-%d')
+        ))
+    title2 = 'Descriptive Statistics for New Cases on ' + date
+    if not is_absolute:
+        title2 += ' (per million inhabitants)'
+    fig2.update_layout(title=title2)
+    return fig, fig2
 
 
-    fig.add_trace(go.Box(y=df_filtered[case_type], name=case_type.replace('_', ' ').title()))
-    fig.update_layout(
-        title=f'Boxplot of {case_type.replace("_", " ").title()} on {date}',
-        yaxis_title='Value'
-    )
+def hdi_adjacency_networks(df: pd.DataFrame) -> nx.Graph:
+    """
+    Create a NetworkX graph based on HDI adjacency matrix.
+    Nodes are countries, edges are weighted by HDI similarity scores.
+    """
+    matrix, hdi_series, locations = adjacency_matrix_human_development_index(df)
+
+    G = nx.Graph()
+
+    for i, loc1 in enumerate(locations):
+        G.add_node(loc1, human_development_index=hdi_series[loc1])
+        for j, loc2 in enumerate(locations):
+            if i < j and matrix[i, j] > 0:
+                G.add_edge(loc1, loc2, weight=matrix[i, j])
+    return G
+
+def hdi_adjacency_network_figure(G: nx.Graph) -> go.Figure:
+    """
+    Create a Plotly figure for the HDI adjacency network.
+    """
+    pos = nx.spring_layout(G, seed=42)
+    edge_x = []
+    edge_y = []
+    for edge in G.edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_x.append(x0)
+        edge_x.append(x1)
+        edge_x.append(None)
+        edge_y.append(y0)
+        edge_y.append(y1)
+        edge_y.append(None)
+
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=0.5, color='#888'),
+        hoverinfo='none',
+        mode='lines')
+
+    node_x = []
+    node_y = []
+    node_text = []
+    for node in G.nodes():
+        x, y = pos[node]
+        node_x.append(x)
+        node_y.append(y)
+        node_text.append(f"{node}<br>HDI: {G.nodes[node]['human_development_index']}")
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers',
+        hoverinfo='text',
+        text=node_text)
+    
+
+    fig = go.Figure(data=[edge_trace, node_trace],
+             layout=go.Layout(
+                title='<br>HDI Adjacency Network',
+                showlegend=False,
+                hovermode='closest',
+                margin=dict(b=20,l=5,r=5,t=40),
+                annotations=[ dict(
+                    text="HDI Adjacency Network based on similarity scores",
+                    showarrow=False,
+                    xref="paper", yref="paper",
+                    x=0.005, y=-0.002 ) ],
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                )
     return fig
-
-
-countries = get_all_iso_code()
-first_country = list(countries.keys())[0]
-dates = get_all_dates()
 
 # Requires Dash 2.17.0 or later
 app.layout = [
     html.Main(children=[
-        html.H1('Covid Study Dashboard'),
-        html.Div(
-            className="row",
-            children= [
-                html.Label('Select Country ISO Code:'),
-                dcc.Dropdown(
-                    id='iso-code-dropdown',
-                    options=[{'label': loc, 'value': code} for code, loc in countries.items()],
-                    value=first_country
+        html.H1('Covid Study Dashboard', style={'textAlign': 'center'}),
+        html.Section(
+            className="section",
+            children=[
+                html.H2("Introduction : Etude d'une base de données sur le Covid-19"),
+                html.P(
+                    "Dans cette étude, nous analysons une base de données mondiale sur le Covid-19, "
+                    "contenant des informations sur les cas, les décès, les tests, la vaccination, "
+                    "ainsi que des indicateurs socio-économiques pour différents pays."
+                ),
+                html.Hr(),
+                html.Div(
+                    className="row",
+                    children= [
+                        html.Label("Sélectionnez un pays :"),
+                        dcc.Dropdown(
+                            id='iso-code-dropdown',
+                            options=[{'label': loc, 'value': code} for code, loc in countries.items()],
+                            value=first_country
+                        ),
+                    ]
+                ),
+                html.Div(
+                    className="row",
+                    children= [
+                        html.Label("Avoir les données en valeurs absolues ou par millions d'habitants :"),
+                        html.Button(
+                            children="Avoir les résultats relatifs",
+                            id="absolute-button",
+                            className="button",
+                        ),
+                    ]
+                ),
+                dcc.Graph(
+                    id='evolution-graph',
+                    figure=evolution_over_time(first_country)
                 ),
             ]
         ),
-        dcc.Graph(
-            id='evolution-graph',
-            figure=evolution_over_time(first_country)
-        ),
-        html.Button(
-            children="Absolute/relatif",
-            id="refresh-button",
-            className="button",
-        ),
-        dcc.Dropdown(
-            id='date-dropdown',
-            options=[date for date in dates],
-            value=dates[0]
-        ),
-        dcc.Graph(
-            id='total-case-death-graph',
-            figure=total_case_total_death_date_geo(dates[0])
-        ),
-        dcc.Graph(
-            id='total-case-vs-death-graph',
-            figure=total_case_total_death_date(dates[0])
-        ),
-        dcc.Graph(
-            id='death-ratio-graph',
-            figure=deaths_ratio_per_country(dates[0])
-        ),
-        html.Div(id='output-container',
+        html.Section(
+            className="section",
             children=[
-                html.H2(id='distribution', children='Distribution of Cases/Deaths'),
-                dcc.Dropdown(
-                    id='case-type-dropdown',
-                    options=[{'label': case.replace("_", " "), 'value': case} for case in cases_type],
-                    value=cases_type[0]
+                html.H2("Section 1 : Etude géographique et temporelle des cas et décès"),
+                html.P(
+                    "Cette section explore la répartition géographique et l'évolution temporelle des cas et décès liés au Covid-19."
+                    " Le logarithme des données a été pris afin de mettre en évidence les différennces entre les différents pays."
+                    " La couleur représente le nombre de décès tandis que la taille des points représente le nombre de cas."
                 ),
-                dcc.Dropdown(
-                    id='date-distribution-dropdown',
-                    options=[date for date in hard_coded_dates],
-                    value=hard_coded_dates[0]
+                html.Hr(),
+                html.Div(
+                    className="row",
+                    children= [
+                        html.Label("Sélectionnez une date :"),
+                        dcc.Dropdown(
+                            id='date-dropdown-geo',
+                            options=[date for date in hard_coded_dates],
+                            value=hard_coded_dates[0]
+                        ),
+                    ]
+                ),
+                html.Div(
+                    className="row",
+                    children= [
+                        html.Label("Avoir les données en valeurs absolues ou par millions d'habitants :"),
+                        html.Button(
+                            children="Avoir les résultats relatifs",
+                            id="absolute-button-geo",
+                            className="button",
+                        ),
+                    ]
+                ),
+                dcc.Graph(
+                    id='total-case-death-geo',
+                    figure=total_case_total_death_date_geo(dates[0])
+                ),
+            ]
+        ),
+
+        html.Div(
+            className='section',
+            children=[
+                html.H2('Section 2 : Distribution sur différentes variables'),
+                html.P(
+                    "Cette section présente la distribution des différents types de cas et décès liés au Covid-19 à une date donnée." \
+                    " Vous pouvez Sélectionnez le type de cas et la date pour visualiser la distribution correspondante."
+                    " Toutes les valeurs sont normalisées par million d'habitants, sauf pour les taux (reproduction_rate, positive_rate, tests_per_case)."
+                ),
+                html.Hr(),
+                
+                html.Div(
+                    className="row",
+                    children= [
+                        html.Label("Sélectionnez une date :"),
+                        dcc.Dropdown(
+                            id='date-dropdown-distribution',
+                            options=[date for date in hard_coded_dates],
+                            value=hard_coded_dates[0]
+                        ),
+                    ]
+                ),
+                html.Div(
+                    className="row",
+                    children= [
+                        html.Label("Sélectionnez une variable que vous souhaitez étudier :"),
+                        dcc.Dropdown(
+                            id='case-type-dropdown',
+                            options=[{'label': case.replace("_", " "), 'value': case} for case in cases_type],
+                            value=cases_type[0]
+                        ),
+                    ]
                 ),
                 html.Ul(id='statistics-list',
                     children=[
@@ -280,54 +671,293 @@ app.layout = [
                 ),
                 dcc.Graph(
                     id='distribution-graph',
-                    figure=get_all_distribution(cases_type[0], dates[0])[0]
-                ),
-                dcc.Graph(
-                    id='boxplot-graph',
-                    figure=get_all_boxplots(hard_coded_dates[0])
+                    figure=get_all_distribution(cases_type[0], hard_coded_dates[0])[0]
                 )
-            ])
-    ]),
-]
+            ]
+        ),
+
+        
+        html.Section(
+            className="section",
+            children=[
+                html.H2("Section 1 : Etude du nombre de cas totaux de Covid-19 entre pays"),
+                html.P(
+                    "Cette section présente une analyse du nombre total de cas de Covid-19 entre les pays."
+                    " Vous pouvez sélectionner une date spécifique pour visualiser la distribution des cas totaux à travers différents pays à cette date."
+                    " Les graphiques affichent les boxplots des cas totaux des pays du monde à la date donnée et 14, 7 jours avant et 7, 14 jours après pour comparison."
+                    " Nettoyage des données, les pays avec 0 cas au moment de la date ne sont pas compris dans l'étude afin d'avoir les données seulement sur les pays infectés."
+                ),
+                html.Div(
+                    className="row",
+                    children= [
+                        html.Label("Sélectionner une date d'étude :"),
+                        dcc.Dropdown(
+                            id='date-dropdown',
+                            options=[date for date in hard_coded_dates],
+                            value=hard_coded_dates[0]
+                        ),
+                    ]
+                ),
+                html.P(
+                    "Afin de ne pas avoir de grands écarts entre les pays fortement peuplés et ceux faiblement, il est possible de normaliser les données par million d'habitants."
+                    " Par défaut, les résultats sont en absolu."
+                ),
+                html.Button(
+                    'Avoir les résultats relatifs',
+                    id='absolute-button',
+                    n_clicks=0,
+                    className="button",
+                ),
+            ]
+        ),
+        dcc.Graph(
+            id='box-plot',
+            figure=total_case_box_plot(covid_df, hard_coded_dates[0])[0]
+        ),
+        dcc.Graph(
+            id='descriptive-stats-plot',
+            figure=total_case_box_plot(covid_df, hard_coded_dates[0])[1]
+        ),
+        
+        html.Section(
+            className="section",
+            children=[
+                html.H2("Section 2 : Etude du nombre de nouveaux cas de Covid-19 entre pays"),
+                html.P(
+                    "Cette section présente une analyse du nombre de nouveaux cas de Covid-19 entre pays sur plusieurs dates."
+                    " Vous pouvez sélectionner une date spécifique pour visualiser la distribution du nombre de nouveau cas à travers différents pays."
+                    " Les graphiques affichent les boxplots à la date donnée et 14, 7 jours avant et 7, 14 jours après pour comparison."
+                    " Il y a un nettoyage des données, les pays avec 0 cas au moment de la date ne sont pas compris dans l'étude afin d'avoir les données seulement sur les pays infectés."
+                ),
+                html.Div(
+                    className="row",
+                    children= [
+                        html.Label("Sélectionner une date d'étude :"),
+                        dcc.Dropdown(
+                            id='date-dropdown-new-cases',
+                            options=[date for date in hard_coded_dates],
+                            value=hard_coded_dates[0]
+                        ),
+                    ]
+                ),
+                html.P(
+                    "Afin de ne pas avoir de grands écarts entre les pays fortement peuplés et ceux faiblement, il est possible de normaliser les données par million d'habitants."
+                    " Par défaut, les résultats sont en absolu."
+                ),
+                html.Button(
+                    'Avoir les résultats relatifs',
+                    id='absolute-button-new-cases',
+                    n_clicks=0,
+                    className="button",
+                ),
+            ]
+        ),
+        dcc.Graph(
+            id='box-plot-new-cases',
+            figure=new_case_box_plot(covid_df, hard_coded_dates[0])[0]
+        ),
+        dcc.Graph(
+            id='descriptive-stats-plot-new-cases',
+            figure=new_case_box_plot(covid_df, hard_coded_dates[0])[1]
+        ),
+
+
+        html.Section(
+            className="section",
+            children=[
+                html.H2("Section 3 : Etude globale des autres variables entre pays"),
+                html.P(
+                    "Dans la base de données, il nous est donné un grand nombre de données différentes, il est possible de faire une rapide étude similaire sur chacune de ces données."
+                    " Vous pouvez sélectionner une date spécifique pour visualiser la distribution de la variable choisie à travers différents pays."
+                ),
+                html.Div(
+                    className="row",
+                    children= [
+                        html.Label("Sélectionner une date d'étude :"),
+                        dcc.Dropdown(
+                            id='date-dropdown-general-case',
+                            options=[date for date in hard_coded_dates],
+                            value=hard_coded_dates[0]
+                        ),
+                    ]
+                ),
+                html.Div(
+                    className="row",
+                    children= [
+                        html.Label("Sélectionner une variable d'étude :"),
+                        dcc.Dropdown(
+                            id='case-dropdown-general-case',
+                            options=[date for date in cases_type],
+                            value=cases_type[0]
+                        ),
+                    ]
+                ),
+                html.P(
+                    "Afin de ne pas avoir de grands écarts entre les pays fortement peuplés et ceux faiblement, il est possible de normaliser les données par million d'habitants."
+                    " Par défaut, les résultats sont en absolu."
+                ),
+                html.Button(
+                    'Avoir les résultats relatifs',
+                    id='absolute-button-general-case',
+                    n_clicks=0,
+                    className="button",
+                ),
+            ]
+        ),
+        dcc.Graph(
+            id='box-plot-general-case',
+            figure=general_case_box_plot(covid_df, cases_type[0], hard_coded_dates[0])[0]
+        ),
+        dcc.Graph(
+            id='descriptive-stats-plot-general-case',
+            figure=general_case_box_plot(covid_df, cases_type[0], hard_coded_dates[0])[1]
+        ),
+
+        
+        html.Section(
+            className="section",
+            children=[
+                html.H2("Section 4 : Etude des variations suivant les dates du nombre de cas totaux."),
+                html.P(
+                    "Cette fois-ci, nous étudions directement l'évolution des différentes valeurs (moyenne, médianne, pourcentiles) sur le nombre de cas totaux."
+                    " Attention : les calculs peuvent prendre du temps, il faut 15 secondes pour passer des valeurs absolues à releatives et inversement ou lors d'un changement du quartile."
+                ),
+                html.P(
+                    "Afin de ne pas avoir de grands écarts entre les pays fortement peuplés et ceux faiblement, il est possible de normaliser les données par million d'habitants."
+                    " Par défaut, les résultats sont en absolu."
+                ),
+                html.Button(
+                    'Avoir les résultats relatifs',
+                    id='absolute-button-total-evolution',
+                    n_clicks=0,
+                    className="button",
+                ),
+                html.P("Sélectionner le quartile à afficher :"),
+                dcc.Slider(
+                    id='quartile-range-slider',
+                    min=1,
+                    max=100,
+                    value=90,
+                ),
+            ]
+        ),
+        dcc.Graph(
+            id='box-plot-total-evolution',
+            figure=total_case_evolution(particular_quantile=0.9, is_absolute=True)
+        ),
+
+        html.Section(
+            className="section",
+            children=[
+                html.H2("Section 5 : Matrice d'adjacence basée sur l'indice de développement humain (IDH)"),
+                html.P(
+                    "Cette section présente une matrice d'adjacence basée sur les différences d'indice de développement humain (IDH) entre les pays."
+                    " Les pays sont connectés par des arêtes pondérées en fonction de la similarité de leur IDH."
+                    " Cette matrice peut être utilisée pour analyser les relations entre les pays en fonction de leur niveau de développement humain."
+                    " De plus, avec le travail effectué sur les clusters, cela permet de faire des visualisation sur des potentielles corrélations entre hdi et gestion de la pandémie."
+                ),
+            ]
+        ),
+        dcc.Graph(
+            id='hdi-adjacency-network',
+            figure=hdi_adjacency_network_figure(hdi_adjacency_networks(covid_df))
+        ),
+
+        html.H2("Clustering des Pays"),
+        html.Div([
+            html.Div([
+                html.Label("Méthode de clustering:"),
+                dcc.Dropdown(
+                    id='course-method',
+                    options=[
+                        {'label': 'K-means (Auto K)', 'value': 'kmeans_auto'},
+                        {'label': 'K-means (K fixe)', 'value': 'kmeans_fixed'},
+                        {'label': 'Gaussian Mixture', 'value': 'gmm'},
+                        {'label': 'DBSCAN', 'value': 'dbscan'}
+                    ],
+                    value='kmeans_auto'
+                ),
+            ], style={'width': '48%', 'display': 'inline-block'}),
+            html.Div([
+                html.Label("Nombre de clusters (si fixe):"),
+                dcc.Input(
+                    id='course-n-clusters',
+                    type='number',
+                    min=2, max=10,
+                    value=4,
+                    disabled=False
+                ),
+            ], style={'width': '48%', 'display': 'inline-block', 'float': 'right'}),
+        ]),
+        html.Div([
+            html.Button("Méthode du Coude", id="course-elbow-btn"),
+            html.Button("Comparer Méthodes", id="course-compare-btn"),
+            html.Button("Lancer Clustering", id="course-cluster-btn"),
+        ], style={'margin': '20px 0'}),
+        
+        html.Div(id="course-elbow-plot"),
+        html.Div(id="course-methods-comparison"),
+        html.Div(id="course-clustering-results"),
+
+
+        html.Footer(
+            className="footer",
+            children="Covid Study Dashboard © 2025 - Coumba Bocar KANE & Quentin POTIRON"
+        )
+    ]
+)]
+
 
 @app.callback(
     Output('evolution-graph', 'figure'),
-    Input('iso-code-dropdown', 'value')
+    Output('absolute-button', 'value'),
+    Input('iso-code-dropdown', 'value'),
+    Input('absolute-button', 'n_clicks'),
 )
-def update_evolution_graph(iso_code):
+def update_evolution_graph(iso_code, is_absolute:int=0):
     if not iso_code:
-        return go.Figure()
+        return go.Figure(), 'Avoir les résultats relatifs'
+    
+    if is_absolute is None:
+        absolute = True
+    else:
+        absolute = (is_absolute % 2 == 0)
+    button_text = 'Avoir les résultats relatifs' if absolute else 'Avoir les résultats absolus'
+
     try:
-        return evolution_over_time(iso_code)
+        fig = evolution_over_time(iso_code, absolute=absolute)
+        return fig, button_text
     except Exception as e:
         fig = go.Figure()
         fig.add_annotation(text=f"Error building figure: {e}", showarrow=False)
-        return fig
+        return fig, button_text
 
 @app.callback(
-    Output('total-case-death-graph', 'figure'),
-    Output('total-case-vs-death-graph', 'figure'),
-    Output('death-ratio-graph', 'figure'),
-    Input('refresh-button', 'n_clicks'),
-    Input('date-dropdown', 'value')
+    Output('total-case-death-geo', 'figure'),
+    Output('absolute-button-geo', 'value'),
+    Input('date-dropdown-geo', 'value'),
+    Input('absolute-button-geo', 'n_clicks'),
 )
-def update_total_graphs(n_clicks, date):
+def update_total_graphs(date, is_absolute:int=0):
     if not date:
-        return go.Figure(), go.Figure()
+        return go.Figure(), 'Avoir les résultats relatifs'
+    if is_absolute is None:
+        absolute = True
+    else:
+        absolute = (is_absolute % 2 == 0)
+    button_text = 'Avoir les résultats relatifs' if absolute else 'Avoir les résultats absolus'
+        
     try:
-        absolute = (n_clicks % 2 == 0) if n_clicks is not None else True
-        fig_geo = total_case_total_death_date_geo(date, absolute)
-        fig_scatter = total_case_total_death_date(date, absolute)
-        fig_death_ratio = deaths_ratio_per_country(date)
-        return fig_geo, fig_scatter, fig_death_ratio
+        fig = total_case_total_death_date_geo(date, absolute=absolute)
+        return fig, button_text
+    
     except Exception as e:
-        err = go.Figure()
-        err.add_annotation(text=f"Error building figure: {e}", showarrow=False)
-        return err, err, err
+        fig = go.Figure()
+        fig.add_annotation(text=f"Error building figure: {e}", showarrow=False)
+        return fig, button_text
 
 
 @app.callback(
-    Output('distribution', 'children'),
     Output('distribution-graph', 'figure'),
     Output('mean-item', 'children'),
     Output('median-item', 'children'),
@@ -336,16 +966,14 @@ def update_total_graphs(n_clicks, date):
     Output('std-item', 'children'),
     Output('absolute-deviation-item', 'children'),
     Input('case-type-dropdown', 'value'),
-    Input('date-distribution-dropdown', 'value')
+    Input('date-dropdown-distribution', 'value')
 )
 def update_distribution_graph(case_type:str, date:str):
     if not case_type or not date:
         return go.Figure()
     try:
-        title = f'Distribution of {case_type.replace("_", " ").title()}'
         fig, mean, median, max, min, std, absolute_deviation = get_all_distribution(case_type, date)
-        return title, \
-            fig, \
+        return fig, \
             f'Mean: {mean:.2f}', \
             f'Median: {median:.2f}', \
             f'Max: {max:.2f}', \
@@ -356,7 +984,200 @@ def update_distribution_graph(case_type:str, date:str):
         fig = go.Figure()
         fig.add_annotation(text=f"Error building figure: {e}", showarrow=False)
         return fig
+
+
+
+@app.callback(
+    Output('box-plot', 'figure'),
+    Output('descriptive-stats-plot', 'figure'),
+    Output('absolute-button', 'children'),
+    Input('date-dropdown', 'value'),
+    Input('absolute-button', 'n_clicks'),
+)
+def update_box_plot(selected_date: str, is_absolute: int) -> Tuple[go.Figure, go.Figure, str]:
+    """
+    Update the box plot based on the selected date from the dropdown.
+
+    Args:
+        selected_date (str): The date selected from the dropdown.
+
+    Returns:
+        go.Figure: The updated box plot figure.
+    """
+    fig1, fig2 = total_case_box_plot(covid_df, selected_date, is_absolute=(is_absolute % 2 == 0))
+    button = 'Avoir les résultats relatifs' if (is_absolute % 2 == 0) else 'Avoir les résultats absolus'
+    return fig1, fig2, button
+
+
+@app.callback(
+    Output('box-plot-new-cases', 'figure'),
+    Output('descriptive-stats-plot-new-cases', 'figure'),
+    Output('absolute-button-new-cases', 'children'),
+    Input('date-dropdown-new-cases', 'value'),
+    Input('absolute-button-new-cases', 'n_clicks'),
+)
+def update_box_plot_new_cases(selected_date: str, is_absolute: int) -> Tuple[go.Figure, go.Figure, str]:
+    """
+    Update the box plot based on the selected date from the dropdown.
+
+    Args:
+        selected_date (str): The date selected from the dropdown.
+
+    Returns:
+        go.Figure: The updated box plot figure.
+    """
+    fig1, fig2 = new_case_box_plot(covid_df, selected_date, is_absolute=(is_absolute % 2 == 0))
+    button = 'Avoir les résultats relatifs' if (is_absolute % 2 == 0) else 'Avoir les résultats absolus'
+    return fig1, fig2, button
+
+@app.callback(
+    Output('box-plot-general-case', 'figure'),
+    Output('descriptive-stats-plot-general-case', 'figure'),
+    Output('absolute-button-general-case', 'children'),
+    Input('date-dropdown-general-case', 'value'),
+    Input('case-dropdown-general-case', 'value'),
+    Input('absolute-button-general-case', 'n_clicks'),
+)
+def update_box_plot_general_case(selected_date: str, selected_case: str, is_absolute:int) -> Tuple[go.Figure, go.Figure, str]:
+    """
+    Update the box plot based on the selected date from the dropdown.
+
+    Args:
+        selected_date (str): The date selected from the dropdown.
+        selected_case (str): The case type selected from the dropdown.
+
+    Returns:
+        go.Figure: The updated box plot figure.
+    """
+    fig1, fig2 = general_case_box_plot(covid_df, selected_case, selected_date, is_absolute=(is_absolute % 2 == 0))
+    button = 'Avoir les résultats relatifs' if (is_absolute % 2 == 0) else 'Avoir les résultats absolus'
+    return fig1, fig2, button
+
+
+
+
+@app.callback(
+    Output('box-plot-total-evolution', 'figure'),
+    Output('absolute-button-total-evolution', 'children'),
+    Output('quartile-range-slider', 'value'),
+    Input('quartile-range-slider', 'value'),
+    Input('absolute-button-total-evolution', 'n_clicks'),
+)
+def update_total_case_evolution(quartile:int, is_absolute: int) -> Tuple[go.Figure, str, int]:
+    """
+    Update the total case evolution plot based on the absolute/relative button.
+
+    Args:
+        is_absolute (int): The number of clicks on the absolute/relative button.
+
+    Returns:
+        go.Figure: The updated total case evolution figure.
+    """
+    print(is_absolute, "value", (is_absolute % 2 == 0))
+    fig = total_case_evolution(particular_quantile=quartile/100, is_absolute=(is_absolute % 2 == 0))
+    button = 'Avoir les résultats relatifs' if (is_absolute % 2 == 0) else 'Avoir les résultats absolus'
+    return fig, button, quartile
+
+
+@app.callback(
+    Output('course-elbow-plot', 'children'),
+    Input('course-elbow-btn', 'n_clicks')
+)
+def show_elbow_plot(n_clicks):
+    if not n_clicks:
+        return ""
     
+    try:
+        elbow_fig, inertias = clustering_manager.create_elbow_plot(base_features)
+        return dcc.Graph(figure=elbow_fig)
+    except Exception as e:
+        return html.Div(f"Erreur: {str(e)}")
+
+@app.callback(
+    Output('course-methods-comparison', 'children'),
+    Input('course-compare-btn', 'n_clicks')
+)
+def compare_methods(n_clicks):
+    if not n_clicks:
+        return ""
+    
+    try:
+        comparison = clustering_manager.compare_methods(base_features)
+        
+        results = [html.H4("Comparaison des Méthodes")]
+        for method, result in comparison.items():
+            silhouette_text = f", Silhouette: {result.get('silhouette', 'N/A')}" if 'silhouette' in result else ""
+            results.append(html.P(f"{method.upper()}: {result['n_clusters']} clusters{silhouette_text}"))
+        
+        return html.Div(results)
+    except Exception as e:
+        return html.Div(f"Erreur: {str(e)}")
+
+@app.callback(
+    Output('course-clustering-results', 'children'),
+    Input('course-cluster-btn', 'n_clicks'),
+    [State('course-method', 'value'),
+     State('course-n-clusters', 'value')]
+)
+def run_course_clustering(n_clicks, method, n_clusters):
+    if not n_clicks:
+        return ""
+    
+    try:
+        if method == 'kmeans_auto':
+            clustered_data, model, features, silhouette = clustering_manager.perform_kmeans(
+                base_features, auto_select=True
+            )
+        elif method == 'kmeans_fixed':
+            clustered_data, model, features, silhouette = clustering_manager.perform_kmeans(
+                base_features, n_clusters=n_clusters, auto_select=False
+            )
+        elif method == 'gmm':
+            clustered_data, model, features = clustering_manager.perform_gaussian_mixture(
+                base_features, n_components=n_clusters
+            )
+        else:  # dbscan
+            clustered_data, model, features = clustering_manager.perform_dbscan(base_features)
+        
+        # Interprétation
+        interpretations = clustering_manager.interpret_clusters(clustered_data, features)
+        
+        # Visualisations
+        visualizations = clustering_manager.create_clustering_visualizations(
+            clustered_data, features, method.upper()
+        )
+        
+        # Construction des résultats
+        results = [
+            html.H3("Résultats du Clustering"),
+            html.H4(f"Méthode: {method.upper()}"),
+        ]
+        
+        # Score silhouette si disponible
+        if 'silhouette' in locals() and silhouette != -1:
+            results.append(html.P(f"Score Silhouette: {silhouette:.3f}"))
+        
+        # Interprétation textuelle
+        results.append(html.H4("Interprétation des Clusters"))
+        for interp in interpretations:
+            results.extend([
+                html.H5(f"{interp['cluster']}: {interp['label']}"),
+                html.P(f"Pays représentatifs: {', '.join(interp['countries'][:3])}"),
+                html.Hr()
+            ])
+        
+        # Graphiques
+        results.extend([
+            dcc.Graph(figure=visualizations['pca']),
+            dcc.Graph(figure=visualizations['map']),
+            dcc.Graph(figure=visualizations['heatmap'])
+        ])
+        
+        return html.Div(results)
+        
+    except Exception as e:
+        return html.Div(f"Erreur: {str(e)}")
+
 
 if __name__ == '__main__':
     app.run(debug=True)
