@@ -1,4 +1,5 @@
-from dash import Dash, html, dash_table, dcc, Input, Output
+from dash import Dash, html, dash_table, dcc, Input, Output, State
+from components.clustering import COVIDClustering1
 from typing import Tuple
 import pandas as pd
 import numpy as np
@@ -8,6 +9,8 @@ import networkx as nx
 import os
 
 app = Dash("Covid study dashboard")
+
+
 cases_type = ['total_cases', 'new_cases', 'total_deaths', 'new_deaths', 'reproduction_rate', 'icu_patients', 'hosp_patients', 'total_tests', 'new_tests', 'positive_rate', 'tests_per_case', 'total_vaccinations', 'people_vaccinated', 'people_fully_vaccinated', 'new_vaccinations', 'vaccinations_per_hundred']
 
 
@@ -20,6 +23,17 @@ hard_coded_dates = ['2020-06-01', '2020-09-01', '2020-12-01',
 path = os.path.join('data', 'covid_data.csv')
 covid_df = pd.read_csv(path, delimiter=",", dtype=str)
 print(covid_df.head())
+
+# INITIALIZATION Of the CLUSTERING MANAGER
+clustering_manager = COVIDClustering1(covid_df)
+base_features = [
+    'total_cases_per_million',
+    'total_deaths_per_million', 
+    'gdp_per_capita',
+    'human_development_index',
+    'aged_65_older',
+    'population_density'
+]
 
 def get_all_iso_code() -> dict:
     # get subset of unique iso_code with locations
@@ -168,7 +182,7 @@ dates = get_all_dates()
 # Requires Dash 2.17.0 or later
 app.layout = [
     html.Main(children=[
-        html.H1('Covid Study Dashboard'),
+        html.H1('Covid Study Dashboard', style={'textAlign': 'center'}),
         dcc.Dropdown(
             id='iso-code-dropdown',
             options=[{'label': loc, 'value': code} for code, loc in countries.items()],
@@ -222,10 +236,48 @@ app.layout = [
                 dcc.Graph(
                     id='distribution-graph',
                     figure=get_all_distribution(cases_type[0], dates[0])[0]
+                )
+            ]
+        ),
+
+        html.H2("Clustering des Pays"),
+        html.Div([
+            html.Div([
+                html.Label("Méthode de clustering:"),
+                dcc.Dropdown(
+                    id='course-method',
+                    options=[
+                        {'label': 'K-means (Auto K)', 'value': 'kmeans_auto'},
+                        {'label': 'K-means (K fixe)', 'value': 'kmeans_fixed'},
+                        {'label': 'Gaussian Mixture', 'value': 'gmm'},
+                        {'label': 'DBSCAN', 'value': 'dbscan'}
+                    ],
+                    value='kmeans_auto'
                 ),
-            ])
-    ]),
-]
+            ], style={'width': '48%', 'display': 'inline-block'}),
+            html.Div([
+                html.Label("Nombre de clusters (si fixe):"),
+                dcc.Input(
+                    id='course-n-clusters',
+                    type='number',
+                    min=2, max=10,
+                    value=4,
+                    disabled=False
+                ),
+            ], style={'width': '48%', 'display': 'inline-block', 'float': 'right'}),
+        ]),
+        html.Div([
+            html.Button("Méthode du Coude", id="course-elbow-btn"),
+            html.Button("Comparer Méthodes", id="course-compare-btn"),
+            html.Button("Lancer Clustering", id="course-cluster-btn"),
+        ], style={'margin': '20px 0'}),
+        
+        html.Div(id="course-elbow-plot"),
+        html.Div(id="course-methods-comparison"),
+        html.Div(id="course-clustering-results")
+    ]
+)]
+
 
 @app.callback(
     Output('evolution-graph', 'figure'),
@@ -293,5 +345,107 @@ def update_distribution_graph(case_type:str, date:str):
         fig = go.Figure()
         fig.add_annotation(text=f"Error building figure: {e}", showarrow=False)
         return fig
+
+
+@app.callback(
+    Output('course-elbow-plot', 'children'),
+    Input('course-elbow-btn', 'n_clicks')
+)
+def show_elbow_plot(n_clicks):
+    if not n_clicks:
+        return ""
+    
+    try:
+        elbow_fig, inertias = clustering_manager.create_elbow_plot(base_features)
+        return dcc.Graph(figure=elbow_fig)
+    except Exception as e:
+        return html.Div(f"Erreur: {str(e)}")
+
+@app.callback(
+    Output('course-methods-comparison', 'children'),
+    Input('course-compare-btn', 'n_clicks')
+)
+def compare_methods(n_clicks):
+    if not n_clicks:
+        return ""
+    
+    try:
+        comparison = clustering_manager.compare_methods(base_features)
+        
+        results = [html.H4("Comparaison des Méthodes")]
+        for method, result in comparison.items():
+            silhouette_text = f", Silhouette: {result.get('silhouette', 'N/A')}" if 'silhouette' in result else ""
+            results.append(html.P(f"{method.upper()}: {result['n_clusters']} clusters{silhouette_text}"))
+        
+        return html.Div(results)
+    except Exception as e:
+        return html.Div(f"Erreur: {str(e)}")
+
+@app.callback(
+    Output('course-clustering-results', 'children'),
+    Input('course-cluster-btn', 'n_clicks'),
+    [State('course-method', 'value'),
+     State('course-n-clusters', 'value')]
+)
+def run_course_clustering(n_clicks, method, n_clusters):
+    if not n_clicks:
+        return ""
+    
+    try:
+        if method == 'kmeans_auto':
+            clustered_data, model, features, silhouette = clustering_manager.perform_kmeans(
+                base_features, auto_select=True
+            )
+        elif method == 'kmeans_fixed':
+            clustered_data, model, features, silhouette = clustering_manager.perform_kmeans(
+                base_features, n_clusters=n_clusters, auto_select=False
+            )
+        elif method == 'gmm':
+            clustered_data, model, features = clustering_manager.perform_gaussian_mixture(
+                base_features, n_components=n_clusters
+            )
+        else:  # dbscan
+            clustered_data, model, features = clustering_manager.perform_dbscan(base_features)
+        
+        # Interprétation
+        interpretations = clustering_manager.interpret_clusters(clustered_data, features)
+        
+        # Visualisations
+        visualizations = clustering_manager.create_clustering_visualizations(
+            clustered_data, features, method.upper()
+        )
+        
+        # Construction des résultats
+        results = [
+            html.H3("Résultats du Clustering"),
+            html.H4(f"Méthode: {method.upper()}"),
+        ]
+        
+        # Score silhouette si disponible
+        if 'silhouette' in locals() and silhouette != -1:
+            results.append(html.P(f"Score Silhouette: {silhouette:.3f}"))
+        
+        # Interprétation textuelle
+        results.append(html.H4("Interprétation des Clusters"))
+        for interp in interpretations:
+            results.extend([
+                html.H5(f"{interp['cluster']}: {interp['label']}"),
+                html.P(f"Pays représentatifs: {', '.join(interp['countries'][:3])}"),
+                html.Hr()
+            ])
+        
+        # Graphiques
+        results.extend([
+            dcc.Graph(figure=visualizations['pca']),
+            dcc.Graph(figure=visualizations['map']),
+            dcc.Graph(figure=visualizations['heatmap'])
+        ])
+        
+        return html.Div(results)
+        
+    except Exception as e:
+        return html.Div(f"Erreur: {str(e)}")
+
+
 if __name__ == '__main__':
     app.run(debug=True)
