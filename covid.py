@@ -20,7 +20,6 @@ hard_coded_dates = ['2020-05-31', '2020-09-06', '2020-12-06',
 # Load dataset
 path = os.path.join('data', 'covid_data.csv')
 covid_df = pd.read_csv(path, delimiter=",", dtype=str)
-print(covid_df.head())
 
 def get_all_iso_code() -> dict:
     # get subset of unique iso_code with locations
@@ -187,6 +186,22 @@ def get_all_boxplots(date: str) -> go.Figure:
     )
     return fig
 
+def boxplot_per_case_type(case_type: str, date: str, delay:int=60) -> go.Figure:
+    """Generate boxplot for a specific case type on a given date."""
+    fig = go.Figure()
+
+
+
+    df_filtered = covid_df[covid_df['date'] == date].copy()
+    df_filtered[case_type] = df_filtered[case_type].astype(float).fillna(0)
+
+
+    fig.add_trace(go.Box(y=df_filtered[case_type], name=case_type.replace('_', ' ').title()))
+    fig.update_layout(
+        title=f'Boxplot of {case_type.replace("_", " ").title()} on {date}',
+        yaxis_title='Value'
+    )
+    return fig
 
 
 countries = get_all_iso_code()
@@ -197,16 +212,26 @@ dates = get_all_dates()
 app.layout = [
     html.Main(children=[
         html.H1('Covid Study Dashboard'),
-        dcc.Dropdown(
-            id='iso-code-dropdown',
-            options=[{'label': loc, 'value': code} for code, loc in countries.items()],
-            value=first_country
+        html.Div(
+            className="row",
+            children= [
+                html.Label('Select Country ISO Code:'),
+                dcc.Dropdown(
+                    id='iso-code-dropdown',
+                    options=[{'label': loc, 'value': code} for code, loc in countries.items()],
+                    value=first_country
+                ),
+            ]
         ),
         dcc.Graph(
             id='evolution-graph',
             figure=evolution_over_time(first_country)
         ),
-        html.Button("Absolute/relatif", id="refresh-button"),
+        html.Button(
+            children="Absolute/relatif",
+            id="refresh-button",
+            className="button",
+        ),
         dcc.Dropdown(
             id='date-dropdown',
             options=[date for date in dates],
@@ -325,5 +350,7 @@ def update_distribution_graph(case_type:str, date:str):
         fig = go.Figure()
         fig.add_annotation(text=f"Error building figure: {e}", showarrow=False)
         return fig
+    
+
 if __name__ == '__main__':
     app.run(debug=True)
