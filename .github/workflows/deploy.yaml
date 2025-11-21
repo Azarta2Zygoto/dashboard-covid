@@ -12,8 +12,7 @@ jobs:
         uses: actions/checkout@main
 
       - name: Setup Pages
-        if: github.ref == 'refs/heads/main'
-        uses: actions/configure-pages@main
+        uses: actions/configure-pages@v5
 
       - name: Setup python
         uses: actions/setup-python@main
