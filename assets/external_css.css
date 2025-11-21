@@ -35,18 +35,17 @@ th {
     padding: 0.5rem 1rem;
     font-size: 16px;
     border: 2px solid #636efa;
+    background-color: transparent;
     border-radius: 8px;
-    background-color: #b1b6fc;
     box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
     transition: background-color 0.3s, color 0.3s;
 }
 .button:hover {
-    background-color: #8a94f9;
+    background-color: #b1b6fc;
     cursor: pointer;
 }
 .button:active {
-    background-color: #636efa;
-    color: white;
+    background-color: #8a94f9;
 }
 .row {
     display: flex;
@@ -59,4 +58,17 @@ th {
     border: 2px solid #636efa;
     border-radius: 8px;
     width: 200px;
+}
+
+input {
+    border: 2px solid #636efa;
+    border-radius: 8px;
+    padding: 0.5rem;
+    font-size: 16px;
+}
+
+.section {
+    padding: 1rem;
+    margin: 1rem 0;
+    box-shadow: -4px 4px 5px #636efa60;
 }
