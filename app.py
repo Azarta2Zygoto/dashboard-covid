@@ -7,7 +7,12 @@ import plotly.graph_objects as go
 import networkx as nx
 import os
 
-app = Dash("Covid study dashboard")
+BASE = "/dashboard-covid"
+app = Dash(
+    "Covid study dashboard",
+    requests_pathname_prefix=BASE + "/",
+    routes_pathname_prefix=BASE + "/")
+
 cases_type = ['total_cases', 'new_cases', 'total_deaths', 'new_deaths', 'reproduction_rate', 'icu_patients', 'hosp_patients', 'total_tests', 'new_tests', 'positive_rate', 'tests_per_case', 'total_vaccinations', 'people_vaccinated', 'people_fully_vaccinated', 'new_vaccinations']
 
 
@@ -20,6 +25,7 @@ hard_coded_dates = ['2020-05-31', '2020-09-06', '2020-12-06',
 # Load dataset
 path = os.path.join('data', 'covid_data.csv')
 covid_df = pd.read_csv(path, delimiter=",", dtype=str)
+pays_df = covid_df[['continent']].dropna()
 
 def get_all_iso_code() -> dict:
     # get subset of unique iso_code with locations
