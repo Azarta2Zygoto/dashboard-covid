@@ -8,7 +8,11 @@ import plotly.graph_objects as go
 import networkx as nx
 import os
 
-app = Dash("Covid study dashboard")
+BASE = "/dashboard-covid"
+app = Dash(
+    "Covid study dashboard",
+    requests_pathname_prefix=BASE + "/",
+    routes_pathname_prefix=BASE + "/")
 
 
 cases_type = ['total_cases', 'new_cases', 'total_deaths', 'new_deaths', 'reproduction_rate', 'icu_patients', 'hosp_patients', 'total_tests', 'new_tests', 'positive_rate', 'tests_per_case', 'total_vaccinations', 'people_vaccinated', 'people_fully_vaccinated', 'new_vaccinations', 'vaccinations_per_hundred']
