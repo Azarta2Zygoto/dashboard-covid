@@ -253,41 +253,76 @@ def total_case_evolution(particular_quantile:float, is_absolute: bool=True) -> g
     """
     fig = go.Figure()
 
-    df_clean = covid_df[pd.to_numeric(covid_df['total_cases'], errors='coerce').notnull()].copy()
+    df_clean = covid_df.copy()
     df_clean['total_cases'] = pd.to_numeric(df_clean['total_cases'], errors='coerce')
     df_clean = df_clean[df_clean['total_cases'] > 0]
     df_clean = df_clean[df_clean['continent'].notna()]
 
+    if df_clean.empty:
+        empty_fig = go.Figure()
+        empty_fig.add_annotation(text="No data available for the selected options.", showarrow=False)
+        return empty_fig
+
     if is_absolute:
-        df_grouped = df_clean.groupby('date')['total_cases']
+        df_clean['value'] = df_clean['total_cases']
     else:
-        df_clean['population'] = pd.to_numeric(df_clean['population'], errors='coerce')
-        df_grouped = (df_clean['total_cases'] / df_clean['population'] * 1000000).groupby(df_clean['date'])
+        df_clean = df_clean[df_clean['population'].notna()]
+        if df_clean.empty:
+            empty_fig = go.Figure()
+            empty_fig.add_annotation(text="No population data to compute per-million values.", showarrow=False)
+            return empty_fig
+        df_clean['value'] = df_clean['total_cases'] / df_clean['population'] * 1e6
 
-    dates = []
-    medians = []
-    means = []
-    std_devs = []
-    p25s = []
-    p75s = []
-    particular_quantiles = []
+    grouped = df_clean.groupby('date')['value']
+    if grouped.ngroups == 0:
+        empty_fig = go.Figure()
+        empty_fig.add_annotation(text="No grouped data available.", showarrow=False)
+        return empty_fig
+    
+    medians = grouped.median().sort_index()
+    means = grouped.mean().sort_index()
+    stds = grouped.std().sort_index().fillna(0)
+    p25 = grouped.quantile(0.25).sort_index()
+    p75 = grouped.quantile(0.75).sort_index()
 
-    for date, group in df_grouped:
-        dates.append(date)
-        medians.append(group.median())
-        means.append(group.mean())
-        std_devs.append(group.std())
-        p25s.append(group.quantile(0.25))
-        p75s.append(group.quantile(0.75))
-        if particular_quantile is not None:
-            particular_quantiles.append(group.quantile(particular_quantile))
-
-    fig.add_trace(go.Scatter(x=dates, y=medians, mode='lines+markers', name='Median'))
-    fig.add_trace(go.Scatter(x=dates, y=means, mode='lines+markers', name='Mean'))
-    fig.add_trace(go.Scatter(x=dates, y=p25s, mode='lines', name='25th Percentile', line=dict(dash='dash')))
-    fig.add_trace(go.Scatter(x=dates, y=p75s, mode='lines', name='75th Percentile', line=dict(dash='dash')))
+    particular_series = None
     if particular_quantile is not None:
-        fig.add_trace(go.Scatter(x=dates, y=particular_quantiles, mode='lines', name=f'{particular_quantile*100}th Percentile', line=dict(dash='dot')))
+        if not (0 <= particular_quantile <= 1):
+            particular_quantile = 0
+        else:
+            particular_series = grouped.quantile(particular_quantile).sort_index()
+
+    # Ensure x-axis are datetimes sorted
+    x = pd.to_datetime(medians.index)
+
+    # Mean +/- std band
+    upper = (means + stds).values
+    lower = (means - stds).clip(lower=0).values
+
+    fig.add_trace(go.Scatter(
+        x=x, y=upper,
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo='skip',
+    ))
+    fig.add_trace(go.Scatter(
+        x=x, y=lower,
+        fill='tonexty',
+        fillcolor='rgba(173,216,230,0.2)',  # light blue band
+        line=dict(width=0),
+        name='Mean ± Std',
+        hoverinfo='skip'
+    ))
+
+    # Median and Mean lines
+    fig.add_trace(go.Scatter(x=x, y=medians.values, mode='lines+markers', name='Median'))
+    fig.add_trace(go.Scatter(x=x, y=means.values, mode='lines+markers', name='Mean'))
+    # Percentile ribbons (25/75)
+    fig.add_trace(go.Scatter(x=x, y=p25.values, mode='lines', name='25th Percentile', line=dict(dash='dash')))
+    fig.add_trace(go.Scatter(x=x, y=p75.values, mode='lines', name='75th Percentile', line=dict(dash='dash')))
+
+    if particular_series is not None:
+        fig.add_trace(go.Scatter(x=x, y=particular_series.values, mode='lines', name=f'{int(particular_quantile*100)}th Percentile', line=dict(dash='dot')))
 
     title = 'Total Cases Evolution Over Time'
     if not is_absolute:
