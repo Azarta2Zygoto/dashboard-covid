@@ -1,11 +1,14 @@
-import os
-import pandas as pd
 import numpy as np
+import pandas as pd
+import networkx as nx
+from typing import Tuple
+import os
 
-path = os.path.join('data', 'covid_data.csv')
-covid_df = pd.read_csv(path, delimiter=",", dtype=str)
+base_dir = os.path.dirname(os.path.abspath(__file__))        # dossier du script
+data_path = os.path.normpath(os.path.join(base_dir, '..', 'data', 'covid_data.csv'))
+covid_df = pd.read_csv(data_path, delimiter=",", dtype=str)
 
-def adjacency_matrix_human_development_index(df: pd.DataFrame) -> np.ndarray:
+def adjacency_matrix_human_development_index(df: pd.DataFrame) -> Tuple[np.ndarray, pd.Series, list]:
     """Compute adjacency matrix based on human development index differences.
     5 if difference == 0
     4 if difference == 0.01
@@ -43,7 +46,24 @@ def adjacency_matrix_human_development_index(df: pd.DataFrame) -> np.ndarray:
         mask = np.isclose(diffs, tval, atol=1e-6)
         matrix[mask] = score
     
-    return matrix, locations
+    return matrix, hdi_series, locations
+
+
+def hdi_adjacency_networks(df: pd.DataFrame) -> nx.Graph:
+    """
+    Create a NetworkX graph based on HDI adjacency matrix.
+    Nodes are countries, edges are weighted by HDI similarity scores.
+    """
+    matrix, hdi_series, locations = adjacency_matrix_human_development_index(df)
+
+    G = nx.Graph()
+
+    for i, loc1 in enumerate(locations):
+        G.add_node(loc1, human_development_index=hdi_series[loc1])
+        for j, loc2 in enumerate(locations):
+            if i < j and matrix[i, j] > 0:
+                G.add_edge(loc1, loc2, weight=matrix[i, j])
+    return G
 
 def count_each_value(matrix: np.ndarray) -> dict:
     value_counts = {}
@@ -55,6 +75,7 @@ def count_each_value(matrix: np.ndarray) -> dict:
 
 
 if __name__ == "__main__":
-    matrix = adjacency_matrix_human_development_index(covid_df)
+
+    matrix, _, _ = adjacency_matrix_human_development_index(covid_df)
     counts = count_each_value(matrix)
     print("Final counts:", counts)

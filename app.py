@@ -1,5 +1,6 @@
-from dash import Dash, html, dash_table, dcc, Input, Output, State
+from dash import Dash, html, dcc, Input, Output, State
 from components.clustering import COVIDClustering1
+from components.adjacency import hdi_adjacency_networks
 from typing import Tuple
 import pandas as pd
 import numpy as np
@@ -174,45 +175,6 @@ def get_all_distribution(case_type: str, date: str) -> Tuple[go.Figure, float, f
         labels={case_type: case_type.replace('_', ' ').title()}
     )
     return fig, mean, median, max, min, std, absolute_deviation
-def adjacency_matrix_human_development_index(df: pd.DataFrame) -> Tuple[np.ndarray, pd.Series, list]:
-    """Compute adjacency matrix based on human development index differences.
-    5 if difference == 0
-    4 if difference == 0.01
-    3 if difference == 0.02
-    2 if difference == 0.03
-    1 if difference == 0.04
-    0 otherwise
-    Args:
-        df (pd.DataFrame): DataFrame containing 'location', 'human_development
-        _index', and 'continent' columns.
-    Returns:
-        np.ndarray: Adjacency matrix as per the defined scoring system.
-    """
-
-    tmp = df[['location', 'human_development_index', 'continent']].copy()
-    tmp['human_development_index'] = pd.to_numeric(tmp['human_development_index'], errors='coerce')
-    tmp = tmp[tmp['human_development_index'].notna() & tmp['continent'].notna()]
-
-    hdi_series = tmp.groupby('location', sort=False)['human_development_index'].first()
-    locations = hdi_series.index.to_list()
-    hdi_values = hdi_series.to_numpy(dtype=float)
-
-    # Pairwise absolute differences using broadcasting (very fast in numpy)
-    diffs = np.abs(hdi_values[:, None] - hdi_values[None, :])
-    # Round differences to 2 decimals to match original binning logic
-    diffs = np.round(diffs, 2)
-
-    # Vectorized mapping: 0->5, 0.01->4, 0.02->3, 0.03->2, 0.04->1, else 0
-    targets = np.array([0.00, 0.01, 0.02, 0.03, 0.04])
-    scores = np.array([5, 4, 3, 2, 1], dtype=np.int8)
-
-    # Use broadcasting with isclose for robustness against float errors
-    matrix = np.zeros_like(diffs, dtype=np.int8)
-    for tval, score in zip(targets, scores):
-        mask = np.isclose(diffs, tval, atol=1e-6)
-        matrix[mask] = score
-    
-    return matrix, hdi_series, locations
 
 
 def total_case_box_plot(
@@ -475,22 +437,6 @@ def new_case_box_plot(
     return fig, fig2
 
 
-def hdi_adjacency_networks(df: pd.DataFrame) -> nx.Graph:
-    """
-    Create a NetworkX graph based on HDI adjacency matrix.
-    Nodes are countries, edges are weighted by HDI similarity scores.
-    """
-    matrix, hdi_series, locations = adjacency_matrix_human_development_index(df)
-
-    G = nx.Graph()
-
-    for i, loc1 in enumerate(locations):
-        G.add_node(loc1, human_development_index=hdi_series[loc1])
-        for j, loc2 in enumerate(locations):
-            if i < j and matrix[i, j] > 0:
-                G.add_edge(loc1, loc2, weight=matrix[i, j])
-    return G
-
 def hdi_adjacency_network_figure(G: nx.Graph) -> go.Figure:
     """
     Create a Plotly figure for the HDI adjacency network.
@@ -680,7 +626,7 @@ app.layout = [
         html.Section(
             className="section",
             children=[
-                html.H2("Section 1 : Etude du nombre de cas totaux de Covid-19 entre pays"),
+                html.H2("Section 3.1 : Etude du nombre de cas totaux de Covid-19 entre pays"),
                 html.P(
                     "Cette section présente une analyse du nombre total de cas de Covid-19 entre les pays."
                     " Vous pouvez sélectionner une date spécifique pour visualiser la distribution des cas totaux à travers différents pays à cette date."
@@ -708,21 +654,21 @@ app.layout = [
                     n_clicks=0,
                     className="button",
                 ),
+                dcc.Graph(
+                    id='box-plot',
+                    figure=total_case_box_plot(covid_df, hard_coded_dates[0])[0]
+                ),
+                dcc.Graph(
+                    id='descriptive-stats-plot',
+                    figure=total_case_box_plot(covid_df, hard_coded_dates[0])[1]
+                ),
             ]
-        ),
-        dcc.Graph(
-            id='box-plot',
-            figure=total_case_box_plot(covid_df, hard_coded_dates[0])[0]
-        ),
-        dcc.Graph(
-            id='descriptive-stats-plot',
-            figure=total_case_box_plot(covid_df, hard_coded_dates[0])[1]
         ),
         
         html.Section(
             className="section",
             children=[
-                html.H2("Section 2 : Etude du nombre de nouveaux cas de Covid-19 entre pays"),
+                html.H2("Section 3.2 : Etude du nombre de nouveaux cas de Covid-19 entre pays"),
                 html.P(
                     "Cette section présente une analyse du nombre de nouveaux cas de Covid-19 entre pays sur plusieurs dates."
                     " Vous pouvez sélectionner une date spécifique pour visualiser la distribution du nombre de nouveau cas à travers différents pays."
@@ -750,22 +696,22 @@ app.layout = [
                     n_clicks=0,
                     className="button",
                 ),
+                dcc.Graph(
+                    id='box-plot-new-cases',
+                    figure=new_case_box_plot(covid_df, hard_coded_dates[0])[0]
+                ),
+                dcc.Graph(
+                    id='descriptive-stats-plot-new-cases',
+                    figure=new_case_box_plot(covid_df, hard_coded_dates[0])[1]
+                ),
             ]
-        ),
-        dcc.Graph(
-            id='box-plot-new-cases',
-            figure=new_case_box_plot(covid_df, hard_coded_dates[0])[0]
-        ),
-        dcc.Graph(
-            id='descriptive-stats-plot-new-cases',
-            figure=new_case_box_plot(covid_df, hard_coded_dates[0])[1]
         ),
 
 
         html.Section(
             className="section",
             children=[
-                html.H2("Section 3 : Etude globale des autres variables entre pays"),
+                html.H2("Section 3.3 : Etude globale des autres variables entre pays"),
                 html.P(
                     "Dans la base de données, il nous est donné un grand nombre de données différentes, il est possible de faire une rapide étude similaire sur chacune de ces données."
                     " Vous pouvez sélectionner une date spécifique pour visualiser la distribution de la variable choisie à travers différents pays."
@@ -802,22 +748,22 @@ app.layout = [
                     n_clicks=0,
                     className="button",
                 ),
+                dcc.Graph(
+                    id='box-plot-general-case',
+                    figure=general_case_box_plot(covid_df, cases_type[0], hard_coded_dates[0])[0]
+                ),
+                dcc.Graph(
+                    id='descriptive-stats-plot-general-case',
+                    figure=general_case_box_plot(covid_df, cases_type[0], hard_coded_dates[0])[1]
+                ),
             ]
-        ),
-        dcc.Graph(
-            id='box-plot-general-case',
-            figure=general_case_box_plot(covid_df, cases_type[0], hard_coded_dates[0])[0]
-        ),
-        dcc.Graph(
-            id='descriptive-stats-plot-general-case',
-            figure=general_case_box_plot(covid_df, cases_type[0], hard_coded_dates[0])[1]
         ),
 
         
         html.Section(
             className="section",
             children=[
-                html.H2("Section 4 : Etude des variations suivant les dates du nombre de cas totaux."),
+                html.H2("Section 3.4 : Etude des variations suivant les dates du nombre de cas totaux."),
                 html.P(
                     "Cette fois-ci, nous étudions directement l'évolution des différentes valeurs (moyenne, médianne, pourcentiles) sur le nombre de cas totaux."
                     " Attention : les calculs peuvent prendre du temps, il faut 15 secondes pour passer des valeurs absolues à releatives et inversement ou lors d'un changement du quartile."
@@ -839,11 +785,52 @@ app.layout = [
                     max=100,
                     value=90,
                 ),
+                dcc.Graph(
+                    id='box-plot-total-evolution',
+                    figure=total_case_evolution(particular_quantile=0.9, is_absolute=True)
+                ),
             ]
         ),
-        dcc.Graph(
-            id='box-plot-total-evolution',
-            figure=total_case_evolution(particular_quantile=0.9, is_absolute=True)
+
+        html.Section(
+            className="section",
+            children=[
+            html.H2("Section 4 : Clustering des Pays"),
+            html.Div([
+                html.Div([
+                    html.Label("Méthode de clustering:"),
+                    dcc.Dropdown(
+                        id='course-method',
+                        options=[
+                            {'label': 'K-means (Auto K)', 'value': 'kmeans_auto'},
+                            {'label': 'K-means (K fixe)', 'value': 'kmeans_fixed'},
+                            {'label': 'Gaussian Mixture', 'value': 'gmm'},
+                            {'label': 'DBSCAN', 'value': 'dbscan'}
+                        ],
+                        value='kmeans_auto'
+                    ),
+                ], style={'width': '48%', 'display': 'inline-block'}),
+                html.Div([
+                    html.Label("Nombre de clusters (si fixe):"),
+                    dcc.Input(
+                        id='course-n-clusters',
+                        type='number',
+                        min=2, max=10,
+                        value=4,
+                        disabled=False
+                    ),
+                ], style={'width': '48%', 'display': 'inline-block', 'float': 'right'}),
+            ]),
+            html.Div([
+                html.Button("Méthode du Coude", id="course-elbow-btn", className="button"),
+                html.Button("Comparer Méthodes", id="course-compare-btn", className="button"),
+                html.Button("Lancer Clustering", id="course-cluster-btn", className="button"),
+            ], style={'margin': '20px 0'}),
+            
+            html.Div(id="course-elbow-plot"),
+            html.Div(id="course-methods-comparison"),
+            html.Div(id="course-clustering-results"),
+            ]
         ),
 
         html.Section(
@@ -856,48 +843,12 @@ app.layout = [
                     " Cette matrice peut être utilisée pour analyser les relations entre les pays en fonction de leur niveau de développement humain."
                     " De plus, avec le travail effectué sur les clusters, cela permet de faire des visualisation sur des potentielles corrélations entre hdi et gestion de la pandémie."
                 ),
+                dcc.Graph(
+                    id='hdi-adjacency-network',
+                    figure=hdi_adjacency_network_figure(hdi_adjacency_networks(covid_df))
+                ),
             ]
         ),
-        dcc.Graph(
-            id='hdi-adjacency-network',
-            figure=hdi_adjacency_network_figure(hdi_adjacency_networks(covid_df))
-        ),
-
-        html.H2("Clustering des Pays"),
-        html.Div([
-            html.Div([
-                html.Label("Méthode de clustering:"),
-                dcc.Dropdown(
-                    id='course-method',
-                    options=[
-                        {'label': 'K-means (Auto K)', 'value': 'kmeans_auto'},
-                        {'label': 'K-means (K fixe)', 'value': 'kmeans_fixed'},
-                        {'label': 'Gaussian Mixture', 'value': 'gmm'},
-                        {'label': 'DBSCAN', 'value': 'dbscan'}
-                    ],
-                    value='kmeans_auto'
-                ),
-            ], style={'width': '48%', 'display': 'inline-block'}),
-            html.Div([
-                html.Label("Nombre de clusters (si fixe):"),
-                dcc.Input(
-                    id='course-n-clusters',
-                    type='number',
-                    min=2, max=10,
-                    value=4,
-                    disabled=False
-                ),
-            ], style={'width': '48%', 'display': 'inline-block', 'float': 'right'}),
-        ]),
-        html.Div([
-            html.Button("Méthode du Coude", id="course-elbow-btn"),
-            html.Button("Comparer Méthodes", id="course-compare-btn"),
-            html.Button("Lancer Clustering", id="course-cluster-btn"),
-        ], style={'margin': '20px 0'}),
-        
-        html.Div(id="course-elbow-plot"),
-        html.Div(id="course-methods-comparison"),
-        html.Div(id="course-clustering-results"),
 
 
         html.Footer(
