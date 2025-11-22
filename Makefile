@@ -1,5 +1,5 @@
 run_app:
-	python3 app.py & sleep 120
+	python3 app.py & sleep 300
 
 	wget -r http://127.0.0.1:8050/
 	wget -r http://127.0.0.1:8050/_dash-layout 

@@ -472,7 +472,12 @@ def new_case_box_plot(
     return fig, fig2
 
 
-def hdi_adjacency_network_figure(G: nx.Graph) -> go.Figure:
+colors = [
+    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'
+]
+
+def hdi_adjacency_network_figure(G: nx.Graph, clusters=None) -> go.Figure:
     """
     Create a Plotly figure for the HDI adjacency network.
     """
@@ -498,16 +503,26 @@ def hdi_adjacency_network_figure(G: nx.Graph) -> go.Figure:
     node_x = []
     node_y = []
     node_text = []
+    inner_colors = []
+    print("cluster", clusters)
     for node in G.nodes():
         x, y = pos[node]
         node_x.append(x)
         node_y.append(y)
         node_text.append(f"{node}<br>HDI: {G.nodes[node]['human_development_index']}")
+        if clusters is not None:
+            line = clusters[clusters['location'] == node]
+            print(line)
+            cluster_number = int(line['cluster'].values[0] if not line.empty else -1)
+            inner_colors.append(colors[cluster_number % len(colors)] if cluster_number >= 0 else '#CCCCCC')
+
     node_trace = go.Scatter(
         x=node_x, y=node_y,
         mode='markers',
         hoverinfo='text',
-        text=node_text)
+        text=node_text,
+        marker=dict(color=inner_colors)
+        )
     
 
     fig = go.Figure(data=[edge_trace, node_trace],
@@ -526,6 +541,8 @@ def hdi_adjacency_network_figure(G: nx.Graph) -> go.Figure:
                 )
     return fig
 
+
+matrix = hdi_adjacency_networks(covid_df)
 # Requires Dash 2.17.0 or later
 app.layout = [
     html.Main(children=[
@@ -685,7 +702,7 @@ app.layout = [
                 ),
                 html.Button(
                     'Avoir les résultats relatifs',
-                    id='absolute-button',
+                    id='absolute-button-total-cases',
                     n_clicks=0,
                     className="button",
                 ),
@@ -871,7 +888,7 @@ app.layout = [
         html.Section(
             className="section",
             children=[
-                html.H2("Section 5 : Matrice d'adjacence basée sur l'indice de développement humain (IDH)"),
+                html.H2("Section 5.1 : Matrice d'adjacence basée sur l'indice de développement humain (IDH)"),
                 html.P(
                     "Cette section présente une matrice d'adjacence basée sur les différences d'indice de développement humain (IDH) entre les pays."
                     " Les pays sont connectés par des arêtes pondérées en fonction de la similarité de leur IDH."
@@ -880,11 +897,25 @@ app.layout = [
                 ),
                 dcc.Graph(
                     id='hdi-adjacency-network',
-                    figure=hdi_adjacency_network_figure(hdi_adjacency_networks(covid_df))
+                    figure=hdi_adjacency_network_figure(matrix)
                 ),
             ]
         ),
 
+        html.Section(
+            className="section",
+            children=[
+                html.H2("Section 5.2 : Résultat du clustering et analyse par rapport à l'IDH"),
+                html.P(
+                    "Il est nécessaire d'avoir lancé un clustering en amont pour que cette section fonctionne."
+                    " Cette section présente une visualisation des résultats du clustering des pays en fonction de leurs valeurs IDH."
+                ),
+                dcc.Graph(
+                    id='hdi-adjacency-network-clustered',
+                    figure=hdi_adjacency_network_figure(matrix)
+                ),
+            ]
+        ),
 
         html.Footer(
             className="footer",
@@ -976,9 +1007,9 @@ def update_distribution_graph(case_type:str, date:str):
 @app.callback(
     Output('box-plot', 'figure'),
     Output('descriptive-stats-plot', 'figure'),
-    Output('absolute-button', 'children'),
+    Output('absolute-button-total-cases', 'children'),
     Input('date-dropdown', 'value'),
-    Input('absolute-button', 'n_clicks'),
+    Input('absolute-button-total-cases', 'n_clicks'),
 )
 def update_box_plot(selected_date: str, is_absolute: int) -> Tuple[go.Figure, go.Figure, str]:
     """
@@ -990,6 +1021,8 @@ def update_box_plot(selected_date: str, is_absolute: int) -> Tuple[go.Figure, go
     Returns:
         go.Figure: The updated box plot figure.
     """
+    if is_absolute is None:
+        is_absolute = 0
     fig1, fig2 = total_case_box_plot(covid_df, selected_date, is_absolute=(is_absolute % 2 == 0))
     button = 'Avoir les résultats relatifs' if (is_absolute % 2 == 0) else 'Avoir les résultats absolus'
     return fig1, fig2, button
@@ -1101,13 +1134,14 @@ def compare_methods(n_clicks):
 
 @app.callback(
     Output('course-clustering-results', 'children'),
+    Output('hdi-adjacency-network-clustered', 'figure'),
     Input('course-cluster-btn', 'n_clicks'),
     [State('course-method', 'value'),
      State('course-n-clusters', 'value')]
 )
 def run_course_clustering(n_clicks, method, n_clusters):
     if not n_clicks:
-        return ""
+        return "", go.Figure()
     
     try:
         if method == 'kmeans_auto':
@@ -1159,10 +1193,12 @@ def run_course_clustering(n_clicks, method, n_clusters):
             dcc.Graph(figure=visualizations['heatmap'])
         ])
         
-        return html.Div(results)
+        print(clustered_data)
+        hdi_figure = hdi_adjacency_network_figure(matrix, clusters=clustered_data)
+        return html.Div(results), hdi_figure
         
     except Exception as e:
-        return html.Div(f"Erreur: {str(e)}")
+        return html.Div(f"Erreur: {str(e)}"), go.Figure()
 
 
 if __name__ == '__main__':
