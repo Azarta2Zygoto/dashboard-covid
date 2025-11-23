@@ -39,4 +39,4 @@ Nous utilisons la PCA pour la visualisation 2D des clusters et des métriques d�
 L’indice de développement humain est une représentation simplifiée du niveau de vie des habitants d’un pays. Il a donc été réfléchi de s’il y avait un lien entre l’indice de développement et le nombre de cas du Covid-19. Cette représentation a donc été faite avec l’aide des résultats du clustering.
 
 ## Utilisation de l'IA
-L'IA a été utilisé afin d'optimiser certaines fonctions, principalement pour remplacer les boucles for par des fonctions numpy appropriées.
+L'IA a été utilisée afin d'optimiser certaines fonctions, principalement pour remplacer les boucles for par des fonctions numpy appropriées.
