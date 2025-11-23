@@ -1,4 +1,5 @@
 # Projet Analyse de donnée
+Notre application se trouve dans le fichier `app.py`. Le fichier `static_app.py` permet d'avoir un visuel statique pour GitHub pages.
 
 ## Membres : 
 **Quentin POTIRON**
