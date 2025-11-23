@@ -67,7 +67,7 @@ class COVIDClustering1:
         return best_k, silhouette_scores
     
     def find_optimal_k_elbow(self, X, max_k=8):
-        """Trouve le k optimal avec la méthode du coude"""
+        """Trouve le k optimal avec la méthode du coude ou elbow """
         if len(X) < 3:
             return 2, []
         
@@ -98,7 +98,7 @@ class COVIDClustering1:
         return best_k, inertias
     
     def perform_kmeans(self, features, n_clusters=None, date=None, auto_select=True):
-        """K-means avec sélection automatique du k optimal."""
+        """K-means avec sélection automatique du k optimal (Auto K)"""
         clustering_data, available_features = self.prepare_data(features, date, normalize=True)
         X = clustering_data[available_features].values
         
@@ -136,7 +136,7 @@ class COVIDClustering1:
         return clustering_data, gmm, available_features
     
     def perform_dbscan(self, features, eps=0.5, min_samples=3, date=None):
-        """DBSCAN pour clusters de forme arbitraire"""
+        """DBSCAN pour clusters de forme arbitraire comme on a vu en cours"""
         clustering_data, available_features = self.prepare_data(features, date, normalize=True)
         X = clustering_data[available_features].values
         
@@ -192,8 +192,95 @@ class COVIDClustering1:
         
         return results
     
+    def _generate_cluster_label(self, high_features, low_features, size):
+        """Génère un label descriptif pour les clusters"""
+    
+        # Mapping des features avec des descriptions plus significatives
+        feature_descriptions = {
+            'total_cases_per_million': 'taux de cas',
+            'total_deaths_per_million': 'taux de mortalité',
+            'gdp_per_capita': 'richesse économique',
+            'human_development_index': 'niveau de développement',
+            'aged_65_older': 'population âgée',
+            'population_density': 'densité de population',
+            'people_fully_vaccinated_per_hundred': 'taux de vaccination',
+            'new_cases_per_million': 'nouveaux cas',
+            'new_deaths_per_million': 'nouvelles morts',
+            'reproduction_rate': 'taux de reproduction',
+            'positive_rate': 'taux de positivité',
+            'tests_per_case': 'tests par cas'
+        }
+    
+        # Catégorisation des caractéristiques
+        economic_indicators = ['gdp_per_capita', 'human_development_index']
+        health_indicators = ['total_cases_per_million', 'total_deaths_per_million', 'new_cases_per_million', 'new_deaths_per_million']
+        demographic_indicators = ['aged_65_older', 'population_density']
+        testing_indicators = ['positive_rate', 'tests_per_case']
+        vaccination_indicators = ['people_fully_vaccinated_per_hundred']
+        
+        # Traduire les features en descriptions françaises
+        def translate_features(feature_list):
+            return [feature_descriptions.get(f, f) for f in feature_list]
+        
+        high_translated = translate_features(high_features)
+        low_translated = translate_features(low_features)
+        
+        # Déterminer le profil général du cluster
+        profile_characteristics = []
+        
+        # Analyser les indicateurs économiques
+        economic_high = [f for f in high_features if f in economic_indicators]
+        economic_low = [f for f in low_features if f in economic_indicators]
+        
+        if economic_high and not economic_low:
+            profile_characteristics.append("économiquement développés")
+        elif economic_low and not economic_high:
+            profile_characteristics.append("économiquement en développement")
+        
+        # Analyser les indicateurs de santé
+        health_high = [f for f in high_features if f in health_indicators]
+        health_low = [f for f in low_features if f in health_indicators]
+        
+        if 'taux de mortalité' in high_translated or 'nouvelles morts' in high_translated:
+            profile_characteristics.append("fort impact sanitaire")
+        elif 'taux de mortalité' in low_translated or 'nouvelles morts' in low_translated:
+            profile_characteristics.append("faible impact sanitaire")
+        
+        if 'taux de cas' in high_translated or 'nouveaux cas' in high_translated:
+            profile_characteristics.append("forte propagation")
+        
+        # Analyser la démographie
+        if 'population âgée' in high_translated:
+            profile_characteristics.append("population vieillissante")
+        if 'densité de population' in high_translated:
+            profile_characteristics.append("forte densité")
+        
+        # Analyser la vaccination
+        if 'taux de vaccination' in high_translated:
+            profile_characteristics.append("bonne couverture vaccinale")
+        elif 'taux de vaccination' in low_translated:
+            profile_characteristics.append("faible couverture vaccinale")
+    
+    # Construire le label final
+        if profile_characteristics:
+            profile = ", ".join(profile_characteristics)
+            return f"Pays {profile} ({size} pays)"
+        else:
+            # Si y'a pas de profil clair, utiliser les caractéristiques principales
+            main_features = []
+            if high_translated:
+                main_features.extend([f"fort {f}" for f in high_translated[:2]])
+            if low_translated:
+                main_features.extend([f"faible {f}" for f in low_translated[:2]])
+            
+            if main_features:
+                features_str = ", ".join(main_features)
+                return f"Pays à {features_str} ({size} pays)"
+            else:
+                return f"Cluster moyen ({size} pays)"
+
     def interpret_clusters(self, clustering_data, features):
-        """Interprète les clusters """
+        """Interprète les clusters avec des descriptions plus significatives"""
         interpretations = []
         
         for cluster in sorted(clustering_data['cluster'].unique()):
@@ -203,59 +290,51 @@ class COVIDClustering1:
             centroid = cluster_data[features].mean()
             global_mean = clustering_data[features].mean()
             
-            # Features distinctives
+            # Features distinctives avec seuils ajustés
             distinctive_high = []
             distinctive_low = []
 
             for feature in features:
                 ratio = centroid[feature] / global_mean[feature]
-                if ratio > 1.2:
+                # Seuils plus stricts pour éviter les faux positifs
+                if ratio > 1.3:  # Augmenté de 1.2 à 1.3
                     distinctive_high.append(feature)
-                elif ratio < 0.8:
+                elif ratio < 0.7:  # Diminué de 0.8 à 0.7
                     distinctive_low.append(feature)
             
-            # Génération de label manuel
+            # Trier par importance (écart le plus grand)
+            distinctive_high.sort(key=lambda f: abs(centroid[f] / global_mean[f] - 1), reverse=True)
+            distinctive_low.sort(key=lambda f: abs(1 - centroid[f] / global_mean[f]), reverse=True)
+            
+            # Génération de label amélioré
             label = self._generate_cluster_label(distinctive_high, distinctive_low, len(cluster_data))
+
+            # Pays représentatifs (essayer d'avoir une diversité géographique)
+            countries_list = cluster_data['location'].head(5).tolist()
+            
+            # Statistiques clés pour l'interprétation
+            key_stats = {}
+            for feature in ['total_cases_per_million', 'total_deaths_per_million', 
+                        'gdp_per_capita', 'human_development_index']:
+                if feature in features:
+                    key_stats[feature] = {
+                        'cluster_mean': centroid[feature],
+                        'global_mean': global_mean[feature],
+                        'ratio': centroid[feature] / global_mean[feature]
+                    }
 
             interpretations.append({
                 'cluster': cluster,
                 'size': len(cluster_data),
                 'label': label,
-                'countries': cluster_data['location'].head(5).tolist(),
-                'distinctive_high': distinctive_high[:3],  # Top 3
+                'countries': countries_list,
+                'distinctive_high': distinctive_high[:3],
                 'distinctive_low': distinctive_low[:3],
+                'key_stats': key_stats,
                 'centroid': centroid.to_dict()
             })
         
         return interpretations
-    
-    def _generate_cluster_label(self, high_features, low_features, size):
-        """Génère un label descriptif """
-        labels = []
-        
-        # Mapping des features à des termes compréhensibles
-        feature_names = {
-            'total_cases_per_million': 'cas',
-            'total_deaths_per_million': 'mortalité',
-            'gdp_per_capita': 'riche',
-            'human_development_index': 'développé',
-            'aged_65_older': 'âgé',
-            'population_density': 'dense',
-            'people_fully_vaccinated_per_hundred': 'vacciné'
-        }
-        
-        for feature in high_features[:2]:
-            if feature in feature_names:
-                labels.append(f"fort {feature_names[feature]}")
-        
-        for feature in low_features[:2]:
-            if feature in feature_names:
-                labels.append(f"faible {feature_names[feature]}")
-        
-        if not labels:
-            return f"Cluster moyen ({size} pays)"
-        
-        return f"Pays à {', '.join(labels)} ({size} pays)"
     
     def create_silhouette_analysis(self, clustering_data, features):
         """Analyse silhouette pour évaluer la qualité du clustering."""
