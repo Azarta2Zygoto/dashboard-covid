@@ -504,7 +504,6 @@ def hdi_adjacency_network_figure(G: nx.Graph, clusters=None) -> go.Figure:
     node_y = []
     node_text = []
     inner_colors = []
-    print("cluster", clusters)
     for node in G.nodes():
         x, y = pos[node]
         node_x.append(x)
@@ -512,7 +511,6 @@ def hdi_adjacency_network_figure(G: nx.Graph, clusters=None) -> go.Figure:
         node_text.append(f"{node}<br>HDI: {G.nodes[node]['human_development_index']}")
         if clusters is not None:
             line = clusters[clusters['location'] == node]
-            print(line)
             cluster_number = int(line['cluster'].values[0] if not line.empty else -1)
             inner_colors.append(colors[cluster_number % len(colors)] if cluster_number >= 0 else '#CCCCCC')
 
@@ -1092,7 +1090,6 @@ def update_total_case_evolution(quartile:int, is_absolute: int) -> Tuple[go.Figu
     Returns:
         go.Figure: The updated total case evolution figure.
     """
-    print(is_absolute, "value", (is_absolute % 2 == 0))
     fig = total_case_evolution(particular_quantile=quartile/100, is_absolute=(is_absolute % 2 == 0))
     button = 'Avoir les résultats relatifs' if (is_absolute % 2 == 0) else 'Avoir les résultats absolus'
     return fig, button, quartile
@@ -1201,4 +1198,4 @@ def run_course_clustering(n_clicks, method, n_clusters):
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run()
