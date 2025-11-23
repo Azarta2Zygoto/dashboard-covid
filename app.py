@@ -1193,7 +1193,6 @@ def run_course_clustering(n_clicks, method, n_clusters):
             dcc.Graph(figure=visualizations['heatmap'])
         ])
         
-        print(clustered_data)
         hdi_figure = hdi_adjacency_network_figure(matrix, clusters=clustered_data)
         return html.Div(results), hdi_figure
         
