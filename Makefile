@@ -15,7 +15,7 @@ run_app:
 
 	wget -r http://127.0.0.1:8050/dashboard-covid/_dash-component-suites/plotly/package_data/plotly.min.js
 
-	mv 127.0.0.1:8050 pages_files
+	mv 127.0.0.1:8050/dashboard-covid pages_files
 	ls -a pages_files
 	ls -a pages_files/assets
 
@@ -32,6 +32,6 @@ run_app:
 
 clean_dirs:
 	ls
-	rm -rf 127.0.0.1:8050/
+	rm -rf 127.0.0.1:8050/dashboard-covid/
 	rm -rf pages_files/
 	rm -rf joblib
