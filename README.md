@@ -1,5 +1,6 @@
 # Projet Analyse de donnée
 Notre application se trouve dans le fichier `app.py`. Le fichier `static_app.py` permet d'avoir un visuel statique pour GitHub pages.
+Vous retrouverez le site à l'adresse suivante : https://azarta2zygoto.github.io/dashboard-covid/ 
 
 ## Membres : 
 **Quentin POTIRON**
