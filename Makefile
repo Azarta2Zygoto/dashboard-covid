@@ -1,7 +1,7 @@
 run_app:
-	python3 app.py & sleep 600
+	python3 app.py & sleep 300
 
-	wget -r http://127.0.0.1:8050/
+	wget -r http://127.0.0.1:8050/dashboard-covid/
 	wget -r http://127.0.0.1:8050/dashboard-covid/_dash-layout 
 	wget -r http://127.0.0.1:8050/dashboard-covid/_dash-dependencies
 
