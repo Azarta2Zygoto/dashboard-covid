@@ -255,6 +255,7 @@ def total_case_evolution(particular_quantile:float, is_absolute: bool=True) -> g
 
     df_clean = covid_df.copy()
     df_clean['total_cases'] = pd.to_numeric(df_clean['total_cases'], errors='coerce')
+    df_clean['population'] = pd.to_numeric(df_clean['population'], errors='coerce')
     df_clean = df_clean[df_clean['total_cases'] > 0]
     df_clean = df_clean[df_clean['continent'].notna()]
 

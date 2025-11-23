@@ -252,6 +252,7 @@ def total_case_evolution(particular_quantile:float, is_absolute: bool=True) -> g
 
     df_clean = covid_df.copy()
     df_clean['total_cases'] = pd.to_numeric(df_clean['total_cases'], errors='coerce')
+    df_clean['population'] = pd.to_numeric(df_clean['population'], errors='coerce')
     df_clean = df_clean[df_clean['total_cases'] > 0]
     df_clean = df_clean[df_clean['continent'].notna()]
 
@@ -539,7 +540,7 @@ def hdi_adjacency_network_figure(G: nx.Graph, clusters=None) -> go.Figure:
 
 matrix = hdi_adjacency_networks(covid_df)
 
-def run_course_clustering(n_clicks, method, n_clusters):
+def run_course_clustering(n_clicks, method, n_clusters) -> Tuple[html.Div, go.Figure]:
     if not n_clicks:
         return "", go.Figure()
     
@@ -899,19 +900,19 @@ app.layout = [
                 ),
                 dcc.Graph(
                     id='hdi-adjacency-network-clustered-1',
-                    figure=hdi_adjacency_network_figure(matrix, clusters=K_means_cluster[1])
+                    figure=K_means_cluster[1]
                 ),
                 dcc.Graph(
                     id='hdi-adjacency-network-clustered-2',
-                    figure=hdi_adjacency_network_figure(matrix, clusters=K_means_cluster_auto[1])
+                    figure=K_means_cluster_auto[1]
                 ),
                 dcc.Graph(
                     id='hdi-adjacency-network-clustered-3',
-                    figure=hdi_adjacency_network_figure(matrix, clusters=gmm_cluster[1])
+                    figure=gmm_cluster[1]
                 ),
                 dcc.Graph(
                     id='hdi-adjacency-network-clustered-4',
-                    figure=hdi_adjacency_network_figure(matrix, clusters=dbscan_cluster[1])
+                    figure=dbscan_cluster[1]
                 ),
             ]
         ),
